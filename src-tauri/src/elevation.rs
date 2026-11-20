@@ -18,7 +18,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     NotElevated,
-    /// Elevated, and staying so for this reason.
+    /// Elevated, and staying so for this reason. (Only Windows has elevation to stay in.)
+    #[cfg_attr(not(windows), allow(dead_code))]
     Stayed(String),
 }
 
