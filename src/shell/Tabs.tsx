@@ -3,7 +3,7 @@ import type { Tab } from "./tabs.ts";
 
 /**
  * The open threads. A dot marks a running turn (amber when it waits on you); double-click a
- * title to rename the session.
+ * title (or press F2 on a tab) to rename the session.
  */
 export function Tabs({
   tabs,
@@ -36,7 +36,9 @@ export function Tabs({
             tabIndex={0}
             onClick={() => onActivate(tab.key)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && editing !== tab.key) onActivate(tab.key);
+              if (editing === tab.key) return;
+              if (e.key === "Enter") onActivate(tab.key);
+              if (e.key === "F2" && tab.opened) setEditing(tab.key);
             }}
             onAuxClick={(e) => {
               if (e.button === 1) onClose(tab.key);
@@ -62,7 +64,7 @@ export function Tabs({
             ) : (
               <span
                 className="min-w-0 flex-1 truncate"
-                title={`${title}\n${tab.workspace}`}
+                title={`${title}\n${tab.workspace}${tab.opened ? "\nDouble-click to rename" : ""}`}
                 onDoubleClick={() => tab.opened && setEditing(tab.key)}
               >
                 {title}
@@ -86,7 +88,14 @@ export function Tabs({
   );
 }
 
-function RenameInput({ initial, onDone }: { initial: string; onDone: (value: string) => void }) {
+/** An inline title editor: Enter or leaving it keeps the text, Escape keeps the old title. */
+export function RenameInput({
+  initial,
+  onDone,
+}: {
+  initial: string;
+  onDone: (value: string) => void;
+}) {
   const [value, setValue] = useState(initial);
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();

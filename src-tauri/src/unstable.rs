@@ -123,10 +123,109 @@ pub fn open_memory(
     spec: &str,
     hf_offline: bool,
 ) -> Result<(Memory, Option<String>), String> {
-    let (embedder, note): (Arc<dyn Embedder>, Option<String>) =
+    let (mut embedder, mut note): (Arc<dyn Embedder>, Option<String>) =
         agent86_core::memory::embeddings::build_embedder(spec, hf_offline);
+    if note.is_some() {
+        // agent86's note names only the exception class ("OSError"), which says nothing about
+        // what to fix. Try once more to learn why, and use the model if it loads this time.
+        if let Some(model) = sentence_transformer_name(spec) {
+            use agent86_core::memory::sentence_transformers::SentenceTransformerEmbedder;
+            match SentenceTransformerEmbedder::load(model, hf_offline) {
+                Ok(loaded) => {
+                    log::info!("The embedder {spec} loaded on a second try");
+                    embedder = Arc::new(loaded);
+                    note = None;
+                }
+                Err(error) => {
+                    log::warn!("The embedder {spec} could not load: {error}");
+                    note = Some(format!(
+                        "sentence-transformers unavailable ({}: {error}); using the offline hash \
+                         embedder.",
+                        error.python_name()
+                    ));
+                }
+            }
+        }
+    }
     let memory = Memory::open_with(path, embedder).map_err(|error| error.to_string())?;
     Ok((memory, note))
+}
+
+/// The model a `sentence-transformers:<model>` spec names (agent86's default when it names none).
+fn sentence_transformer_name(spec: &str) -> Option<&str> {
+    let (scheme, name) = spec.split_once(':').unwrap_or((spec, ""));
+    (scheme.trim() == "sentence-transformers").then(|| match name.trim() {
+        "" => "all-MiniLM-L6-v2",
+        name => name,
+    })
+}
+
+/// What the server behind provider `name` (a section of `kind` at `base_url`) reports as `model`'s
+/// context window: OpenRouter's catalogue (by name or by host), a vLLM server's `max_model_len`,
+/// Google's model list, or LM Studio's loaded length, as the CLI asks them. `None` for other
+/// kinds, a server that does not answer, or a model it does not list. Blocking (short HTTP
+/// requests, memoized per process; OpenRouter's and Google's lists are cached on disk for a day
+/// in the file the CLI shares); call off the UI thread.
+pub fn discovered_context_window(
+    name: &str,
+    kind: ProviderKind,
+    base_url: Option<&str>,
+    model: &str,
+    key: Option<String>,
+) -> Option<u64> {
+    use agent86_core::provider::remote_windows;
+    use agent86_core::secrets::SecretStore;
+
+    // Unit tests never reach a real server; they inject what one would report.
+    if cfg!(test) {
+        return None;
+    }
+
+    /// The key the app already resolved, for whichever account agent86 asks about.
+    struct Resolved(Option<String>);
+    impl SecretStore for Resolved {
+        fn get_password(&self, _service: &str, _account: &str) -> Option<String> {
+            self.0.clone()
+        }
+    }
+
+    // agent86 recognises Google by the section's name and the local servers by `adapter`.
+    let (provider, adapter) = match kind {
+        ProviderKind::Openai => (name, None),
+        ProviderKind::Google => ("google", None),
+        ProviderKind::Vllm => (name, Some("vllm")),
+        ProviderKind::Lmstudio => (name, Some("lmstudio")),
+        // Anthropic lists no lengths; Ollama and llama.cpp are sized from the settings.
+        ProviderKind::Anthropic | ProviderKind::Ollama | ProviderKind::Llamacpp => return None,
+    };
+    let mut config = builtin_config();
+    config.providers.clear();
+    config.providers.insert(
+        provider.to_owned(),
+        ProviderConfig {
+            base_url: base_url
+                .map(str::trim)
+                .filter(|url| !url.is_empty())
+                .map(str::to_owned),
+            adapter: adapter.map(str::to_owned),
+            // agent86 reads a key only for a section that names a variable; the variable itself
+            // is never set, so the key comes from `Resolved`.
+            api_key_env: key
+                .is_some()
+                .then(|| "AGENT86_DESKTOP_RESOLVED_KEY".to_owned()),
+            ..ProviderConfig::default()
+        },
+    );
+    let cache = agent86_core::config::home_dir()
+        .map(|home| remote_windows::cache_path(&home.join(".agent86")));
+    remote_windows::discover_context_window(
+        provider,
+        model,
+        &config,
+        cache.as_deref(),
+        &Resolved(key),
+    )
+    .filter(|&window| window > 0)
 }
 
 /// agent86's context window for `model` (a bare model id) from its built-in table, or its default

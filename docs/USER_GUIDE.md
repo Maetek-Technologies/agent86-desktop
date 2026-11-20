@@ -76,7 +76,9 @@ offers **The settings' model** to go back.
 
 The agent's answer streams in with its thinking (folded) and a card for each tool call. Cards for
 edits show the diff; reads show the file, highlighted; commands show their output. The header shows
-the model, how full its context is, and what the thread has spent.
+the model, how full its context is, and what the thread has spent. A model's context window is the
+one set for it in the settings if there is one, else what its server reports (OpenRouter's
+catalogue, a vLLM server's `max_model_len`, LM Studio, Google), else agent86's built-in table.
 
 ### Approvals
 
@@ -97,8 +99,9 @@ variable and the model only ever sees `${secret:NAME}`.
 ### Sessions
 
 Every thread is saved as it goes, in the same database the CLI uses (`~/.agent86/memory.db`). The
-sidebar lists recent sessions, from the app and the CLI; click one to reopen it. Double-click a
-tab's title to rename it. A session the app has not seen before asks which folder it belongs to.
+sidebar lists recent sessions, from the app and the CLI; click one to reopen it. To rename one,
+hover it in the sidebar and click ✎, or double-click a tab's title (or press F2 on the tab). A
+session the app has not seen before asks which folder it belongs to.
 
 ### Sub-agents and worktrees
 

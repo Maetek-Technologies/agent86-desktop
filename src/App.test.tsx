@@ -400,6 +400,43 @@ test("logs: shows activity with totals and problems, and the app log", async () 
   expect(calls.map((c) => c.cmd)).toContain("read_app_log");
 });
 
+test("renames a saved session from the sidebar, and its open tab follows", async () => {
+  const calls = backend((cmd, args) =>
+    cmd === "rename_session" ? `${args.title as string}` : undefined,
+  );
+  render(<App />);
+  const list = await screen.findByRole("navigation", { name: "Sessions" });
+  fireEvent.click(await within(list).findByText("Fix the parser"));
+  await screen.findByRole("tab", { name: /Fix the parser/ });
+  fireEvent.click(within(list).getByRole("button", { name: "Rename Fix the parser" }));
+  const input = within(list).getByLabelText("Session title");
+  fireEvent.change(input, { target: { value: "Parser rewrite" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(await screen.findByRole("tab", { name: /Parser rewrite/ })).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "rename_session")?.args).toMatchObject({
+    sessionId: "s-old",
+    title: "Parser rewrite",
+  });
+});
+
+test("renames an open tab with F2", async () => {
+  const calls = backend((cmd, args) =>
+    cmd === "rename_session" ? `${args.title as string}` : undefined,
+  );
+  render(<App />);
+  const list = await screen.findByRole("navigation", { name: "Sessions" });
+  fireEvent.click(await within(list).findByText("Fix the parser"));
+  fireEvent.keyDown(await screen.findByRole("tab", { name: /Fix the parser/ }), { key: "F2" });
+  const input = screen.getByLabelText("Session title");
+  fireEvent.change(input, { target: { value: "Parser v2" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(await screen.findByRole("tab", { name: /Parser v2/ })).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "rename_session")?.args).toMatchObject({
+    sessionId: "s-old",
+    title: "Parser v2",
+  });
+});
+
 test("closes a tab and its thread", async () => {
   const calls = backend();
   render(<App />);

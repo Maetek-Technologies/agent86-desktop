@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { SessionList, SessionSummary, UpdateInfo } from "../desktop-client/events.ts";
 import { modLabel } from "./shortcuts.ts";
 import { folderName } from "./tabs.ts";
+import { RenameInput } from "./Tabs.tsx";
 
 /** "just now", "5 min ago", "3 h ago", "yesterday", or a date. */
 export function ago(seconds: number, now = Date.now() / 1000): string {
@@ -14,8 +16,8 @@ export function ago(seconds: number, now = Date.now() / 1000): string {
 
 /**
  * The sessions saved in the memory database the agent86 CLI shares, newest first: click one to
- * reopen it (in its own folder when the app knows it, else after asking). Sessions open in a tab
- * are marked.
+ * reopen it (in its own folder when the app knows it, else after asking), or its ✎ to rename it.
+ * Sessions open in a tab are marked.
  */
 export function Sidebar({
   list,
@@ -23,6 +25,7 @@ export function Sidebar({
   busy,
   onNew,
   onOpen,
+  onRename,
   onRefresh,
   onSettings,
   settingsOpen,
@@ -40,6 +43,8 @@ export function Sidebar({
   busy: boolean;
   onNew: () => void;
   onOpen: (session: SessionSummary) => void;
+  /** Give a saved session a new title. */
+  onRename?: (session: SessionSummary, title: string) => void;
   onRefresh: () => void;
   onSettings: () => void;
   /** The settings view is showing. */
@@ -52,6 +57,7 @@ export function Sidebar({
   onLogs?: () => void;
   logsOpen?: boolean;
 }) {
+  const [editing, setEditing] = useState<string | null>(null);
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
       <div className="flex items-center gap-2 border-b border-border p-2">
@@ -86,8 +92,22 @@ export function Sidebar({
         <ul>
           {list?.sessions.map((session) => {
             const open = openSessions.has(session.id);
+            const title = session.title ?? "(untitled)";
+            if (editing === session.id) {
+              return (
+                <li key={session.id} className="flex px-3 py-1.5">
+                  <RenameInput
+                    initial={session.title ?? ""}
+                    onDone={(value) => {
+                      setEditing(null);
+                      if (value && value !== session.title) onRename?.(session, value);
+                    }}
+                  />
+                </li>
+              );
+            }
             return (
-              <li key={session.id}>
+              <li key={session.id} className="group relative">
                 <button
                   type="button"
                   disabled={busy}
@@ -95,13 +115,13 @@ export function Sidebar({
                   className="block w-full px-3 py-1.5 text-left hover:bg-panel-2 disabled:opacity-60"
                   title={session.workspace ?? "Folder not known: you will be asked for it"}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 pr-5">
                     {open && (
                       <span className="text-accent" aria-label="open">
                         ●
                       </span>
                     )}
-                    <span className="truncate">{session.title ?? "(untitled)"}</span>
+                    <span className="truncate">{title}</span>
                   </span>
                   <span className="flex gap-2 text-xs text-muted">
                     <span className="truncate">
@@ -110,6 +130,17 @@ export function Sidebar({
                     <span className="ml-auto shrink-0">{ago(session.updatedAt)}</span>
                   </span>
                 </button>
+                {onRename && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(session.id)}
+                    title="Rename"
+                    aria-label={`Rename ${title}`}
+                    className="absolute top-1 right-1 rounded px-1 text-xs text-muted opacity-0 group-hover:opacity-100 hover:bg-panel hover:text-text focus:opacity-100"
+                  >
+                    ✎
+                  </button>
+                )}
               </li>
             );
           })}

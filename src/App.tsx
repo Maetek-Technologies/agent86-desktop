@@ -334,6 +334,24 @@ export function App() {
     [refreshSessions, dispatch],
   );
 
+  // A saved session renamed from the sidebar; a tab showing it takes the new title too.
+  const renameSaved = useCallback(
+    (session: SessionSummary, title: string) => {
+      renameSession(session.id, title).then(
+        (kept) => {
+          for (const tab of stateRef.current.tabs) {
+            if (tab.opened?.sessionId === session.id) {
+              dispatch({ type: "title", key: tab.key, title: kept });
+            }
+          }
+          refreshSessions();
+        },
+        (e: unknown) => setError(String(e)),
+      );
+    },
+    [refreshSessions, dispatch],
+  );
+
   if (settingsState && !settingsState.settings) {
     return (
       <div className="h-screen bg-bg text-text">
@@ -353,6 +371,7 @@ export function App() {
         busy={opening || !model || !!model.problem}
         onNew={() => void newThread()}
         onOpen={(session) => void reopen(session)}
+        onRename={renameSaved}
         onRefresh={refreshSessions}
         onSettings={toggleSettings}
         settingsOpen={showSettings}

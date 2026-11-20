@@ -56,6 +56,7 @@ fn model_priced(
         .get(name)
         .ok_or_else(|| format!("Provider {name:?} is not set up (Settings, Providers)."))?;
     let key = keys::resolve(name, section, keys);
+    let key_for_window = key.clone();
     if section.key_use() == KeyUse::Required && key.is_none() {
         let env = section
             .api_key_env
@@ -79,7 +80,15 @@ fn model_priced(
     Ok(ModelSetup {
         reference: reference.trim().to_owned(),
         provider,
-        context_window: context_window(settings, reference),
+        context_window: context_window_with(settings, reference, |_, _, _| {
+            unstable::discovered_context_window(
+                name,
+                section.kind,
+                section.base_url.as_deref(),
+                model,
+                key_for_window,
+            )
+        }),
         max_output_tokens,
     })
 }
@@ -93,8 +102,28 @@ fn max_output_tokens(settings: &Settings, section: &ProviderSettings) -> u32 {
 }
 
 /// Tokens of context for `reference`: the user's figure (by the full ref, then the bare id), then
-/// Ollama's `numCtx`, then agent86's table.
-pub fn context_window(settings: &Settings, reference: &str) -> u64 {
+/// Ollama's `numCtx`, then what the provider's server reports (OpenRouter's catalogue, a vLLM
+/// server's `max_model_len`, ...), then agent86's table. Blocking when it asks a server; call off
+/// the UI thread.
+pub fn context_window(settings: &Settings, reference: &str, keys: &dyn KeySource) -> u64 {
+    context_window_with(settings, reference, |name, section, model| {
+        let key = keys::resolve(name, section, keys);
+        unstable::discovered_context_window(
+            name,
+            section.kind,
+            section.base_url.as_deref(),
+            model,
+            key,
+        )
+    })
+}
+
+/// [`context_window`] with `discover` in place of asking the provider's server.
+fn context_window_with(
+    settings: &Settings,
+    reference: &str,
+    discover: impl FnOnce(&str, &ProviderSettings, &str) -> Option<u64>,
+) -> u64 {
     let reference = reference.trim();
     let (name, model) = split_ref(reference).unwrap_or(("", reference));
     for key in [reference, model] {
@@ -102,11 +131,16 @@ pub fn context_window(settings: &Settings, reference: &str) -> u64 {
             return window;
         }
     }
-    match settings.providers.get(name).map(|p| (p.kind, p.num_ctx)) {
-        Some((ProviderKind::Ollama, num_ctx)) => num_ctx.filter(|&n| n > 0).map_or(8192, u64::from),
+    let Some(section) = settings.providers.get(name) else {
+        return unstable::table_context_window(model);
+    };
+    match section.kind {
+        ProviderKind::Ollama => section.num_ctx.filter(|&n| n > 0).map_or(8192, u64::from),
         // llama.cpp's window is a launch flag its API does not report.
-        Some((ProviderKind::Llamacpp, _)) => 8192,
-        _ => unstable::table_context_window(model),
+        ProviderKind::Llamacpp => 8192,
+        _ => {
+            discover(name, section, model).unwrap_or_else(|| unstable::table_context_window(model))
+        }
     }
 }
 
@@ -283,7 +317,7 @@ pub fn thread_plan(
         }
         builder = builder.triage(triage.cheap.trim(), triage.frontier.trim());
         model = triage.frontier.trim().to_owned();
-        window = context_window(settings, &model);
+        window = context_window(settings, &model, keys);
     }
 
     let mut notes = Vec::new();
@@ -520,21 +554,40 @@ mod tests {
     }
 
     #[test]
-    fn context_windows_come_from_settings_then_ollama_then_the_table() {
+    fn context_windows_come_from_settings_then_ollama_then_the_server_then_the_table() {
+        let never = |_: &str, _: &ProviderSettings, _: &str| -> Option<u64> {
+            panic!("the server is not asked when the window is known")
+        };
         let mut settings = settings();
         settings.model.context_windows.insert("qwen".into(), 65_536);
-        assert_eq!(context_window(&settings, "vllm:qwen"), 65_536);
+        assert_eq!(context_window_with(&settings, "vllm:qwen", never), 65_536);
         settings
             .model
             .context_windows
             .insert("vllm:qwen".into(), 131_072);
-        assert_eq!(context_window(&settings, "vllm:qwen"), 131_072);
+        assert_eq!(context_window_with(&settings, "vllm:qwen", never), 131_072);
         let mut ollama = preset("ollama").unwrap();
         ollama.num_ctx = Some(16_384);
         settings.providers.insert("ollama".into(), ollama);
-        assert_eq!(context_window(&settings, "ollama:llama3.1:8b"), 16_384);
         assert_eq!(
-            context_window(&settings, "openrouter:anthropic/x"),
+            context_window_with(&settings, "ollama:llama3.1:8b", never),
+            16_384
+        );
+        // What the server reports beats the table's guess from the name.
+        let reported = context_window_with(
+            &settings,
+            "openrouter:anthropic/claude-opus-5.5",
+            |name, section, model| {
+                assert_eq!(name, "openrouter");
+                assert_eq!(section.kind, ProviderKind::Openai);
+                assert_eq!(model, "anthropic/claude-opus-5.5");
+                Some(1_000_000)
+            },
+        );
+        assert_eq!(reported, 1_000_000);
+        // A server that does not answer leaves the table.
+        assert_eq!(
+            context_window_with(&settings, "openrouter:anthropic/x", |_, _, _| None),
             unstable::table_context_window("anthropic/x")
         );
     }

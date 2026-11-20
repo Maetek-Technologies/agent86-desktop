@@ -106,7 +106,7 @@ fn describe_model(store: &SettingsStore) -> ModelInfo {
         .iter()
         .find_map(|r| agent_factory::model(&settings, r, &OsKeys).err());
     ModelInfo {
-        context_window: agent_factory::context_window(&settings, &reference),
+        context_window: agent_factory::context_window(&settings, &reference, &OsKeys),
         reference,
         triage: triage.is_some(),
         problem,

@@ -256,6 +256,16 @@ the platform's log folder). `logs.rs` reads the end of either file (4 MB at most
 view (`read_activity`, `read_app_log`, `reveal_log`); the view summarises events, totals tokens and
 cost, filters by kind, thread, and text, and refreshes live.
 
+**1.0.2: context windows and renaming.** A model's window is the user's figure, else what its
+server reports (`remote_windows::discover_context_window`: OpenRouter's catalogue, cached a day in
+the CLI's `~/.agent86/cache/model_context_windows.json`; a vLLM server's `max_model_len`; LM
+Studio; Google), else agent86's table, which guesses from the name (`qwen` 32k, `claude` 200k). A
+32k guess for a 131k vLLM model left about 2k tokens of conversation, so agent86-core's `fit`
+dropped the user's message and Qwen's chat template refused the request ("No user query found").
+An embedder that falls back to the hash one is tried once more, and the note and the log say why
+it failed. Sessions are renamed from the sidebar (✎) or with F2 on a tab, besides double-clicking
+its title.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives
