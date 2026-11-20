@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileActions, joinPath } from "../tools/FileActions.tsx";
 import type { SubagentActivity, SubCall } from "../desktop-client/session-state.ts";
 import { Highlight } from "../highlight/Highlight.tsx";
 import { argumentSummary } from "../tools/approval.ts";
@@ -107,7 +108,7 @@ export function WorktreeView({ worktree }: { worktree: WorktreeNote }) {
           <span>
             kept at <span className="font-mono">{worktree.path}</span> on branch{" "}
             <span className="font-mono">{worktree.branch}</span>; nothing was applied to your
-            workspace
+            workspace <FileActions path={worktree.path} open={false} />
           </span>
         ) : (
           <span className="text-muted">changed nothing and was removed</span>
@@ -126,6 +127,7 @@ export function WorktreeView({ worktree }: { worktree: WorktreeNote }) {
           {worktree.files.map((f) => (
             <li key={f.path} className="flex gap-2">
               <span className="truncate">{f.path}</span>
+              {worktree.path && <FileActions path={joinPath(worktree.path, f.path)} />}
               <span className="ml-auto text-ok">+{f.added}</span>
               <span className="text-error">−{f.removed}</span>
             </li>

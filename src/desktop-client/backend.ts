@@ -2,6 +2,7 @@
 // so the IPC contract lives in one place: here, src-tauri/src/commands.rs, and the types ts-rs
 // generates from it.
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   Answer,
   AppInfo,
@@ -135,6 +136,28 @@ export function answer(threadId: string, qid: number, answer: Answer): Promise<v
 
 export function closeThread(threadId: string): Promise<void> {
   return invoke("close_thread", { threadId });
+}
+
+/**
+ * Show a desktop notification (unless they are off in Settings). Clicking it brings the app
+ * forward on tab `tab`; see `onActivateTab`.
+ */
+export function notify(title: string, body: string, tab: string | null): Promise<void> {
+  return invoke("notify", { title, body, tab });
+}
+
+/** Call `handler` with a tab's key when a notification about that tab is clicked. */
+export function onActivateTab(handler: (tab: string) => void): Promise<() => void> {
+  return listen<string>("activate-tab", (event) => handler(event.payload));
+}
+
+/**
+ * Open a file of the thread's with its default app, or with `reveal`, show it in Explorer or
+ * Finder. Rust allows only paths inside the thread's workspace or a worktree its sub-agents kept,
+ * and only reveals programs and scripts.
+ */
+export function openPath(threadId: string, path: string, reveal: boolean): Promise<void> {
+  return invoke("open_path", { threadId, path, reveal });
 }
 
 /** Rebuild a thread with the current settings and project trust, keeping its conversation. */

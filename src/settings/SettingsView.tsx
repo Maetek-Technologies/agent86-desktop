@@ -12,8 +12,10 @@ import type {
   McpTransport,
   Settings,
   SettingsState,
+  Theme,
   TrustedProject,
 } from "../desktop-client/events.ts";
+import { isMac, shortcutList } from "../shell/shortcuts.ts";
 import {
   buttonClass,
   LinesField,
@@ -45,6 +47,7 @@ const SECTIONS = [
   "MCP servers",
   "Memory",
   "Projects",
+  "Appearance",
 ] as const;
 type SectionName = (typeof SECTIONS)[number];
 
@@ -151,6 +154,7 @@ export function SettingsView({
               <MemorySection state={state} draft={draft} onChange={change} />
             )}
             {section === "Projects" && <ProjectsSection />}
+            {section === "Appearance" && <AppearanceSection draft={draft} onChange={change} />}
           </div>
         </main>
       </div>
@@ -706,6 +710,56 @@ export function ImportSummary({
         </button>
       </div>
     </div>
+  );
+}
+
+/** How the app looks and when it speaks up: theme, notifications, tray icon; the shortcuts. */
+function AppearanceSection({ draft, onChange }: Props) {
+  const ui = draft.ui;
+  const setUi = (patch: Partial<Settings["ui"]>) => onChange({ ...draft, ui: { ...ui, ...patch } });
+  return (
+    <>
+      <Section title="Appearance" intro="These apply as soon as you save.">
+        <Select<Theme>
+          label="Theme"
+          value={ui.theme}
+          options={[
+            { value: "system", label: "As the system" },
+            { value: "light", label: "Light" },
+            { value: "dark", label: "Dark" },
+          ]}
+          onChange={(theme) => setUi({ theme })}
+        />
+        <Toggle
+          label="Notifications"
+          hint="When an approval, a limit, or a secret request waits, or a turn of 30 seconds or more ends, while the app or that tab is not in front. Clicking one shows the tab."
+          checked={ui.notifications}
+          onChange={(notifications) => setUi({ notifications })}
+        />
+        <Toggle
+          label="Tray icon"
+          hint="An icon in the system tray (the menu bar on macOS) that shows how many turns are running."
+          checked={ui.tray}
+          onChange={(tray) => setUi({ tray })}
+        />
+      </Section>
+      <Section title="Keyboard shortcuts">
+        <table className="self-start text-sm">
+          <tbody>
+            {shortcutList(isMac()).map((s) => (
+              <tr key={s.action}>
+                <td className="py-0.5 pr-6 font-mono text-xs whitespace-nowrap">{s.keys}</td>
+                <td className="py-0.5 text-muted">{s.action}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="py-0.5 pr-6 font-mono text-xs whitespace-nowrap">Esc</td>
+              <td className="py-0.5 text-muted">In the prompt: close a menu, or stop the turn</td>
+            </tr>
+          </tbody>
+        </table>
+      </Section>
+    </>
   );
 }
 

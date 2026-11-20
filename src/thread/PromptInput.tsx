@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { modLabel } from "../shell/shortcuts.ts";
 import type { CommandInfo } from "../desktop-client/commands.ts";
 import { loadHistory, pushHistory } from "./history.ts";
 
@@ -261,6 +262,7 @@ export function PromptInput({
             &gt;
           </span>
           <textarea
+            data-prompt-input
             ref={ref}
             rows={1}
             value={text}
@@ -288,6 +290,7 @@ export function PromptInput({
               type="button"
               onClick={onStop}
               disabled={cancelling}
+              title={`Stop the turn (Esc, or ${modLabel()}.)`}
               className="rounded border border-border px-3 py-1 text-sm hover:border-error hover:text-error disabled:opacity-50"
             >
               {cancelling ? "Stopping…" : "Stop"}

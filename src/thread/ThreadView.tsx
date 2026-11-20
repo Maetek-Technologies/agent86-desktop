@@ -55,7 +55,7 @@ export function ThreadView({
   }, [state.entries.length, lastLength, question]);
 
   return (
-    <ThreadContext.Provider value={{ cwd: thread.workspace }}>
+    <ThreadContext.Provider value={{ cwd: thread.workspace, threadId: thread.threadId }}>
       <div className="relative flex h-full flex-col bg-bg text-text">
         <header className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2 text-sm">
           <span className="min-w-0 flex-1 truncate font-mono" title={thread.workspace}>

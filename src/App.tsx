@@ -8,6 +8,8 @@ import {
   getSettings,
   listSessions,
   modelInfo,
+  notify,
+  onActivateTab,
   openThread,
   pickWorkspace,
   prompt,
@@ -22,8 +24,11 @@ import {
 import { listItems, parseCommand } from "./desktop-client/commands.ts";
 import type { Answer, DesktopEvent, SessionSummary } from "./desktop-client/events.ts";
 import type { LocalAction } from "./desktop-client/session-state.ts";
+import { notificationFor } from "./shell/notify.ts";
+import { isMac, shortcutFor, tabTarget } from "./shell/shortcuts.ts";
 import { Sidebar } from "./shell/Sidebar.tsx";
 import { Tabs } from "./shell/Tabs.tsx";
+import { applyTheme } from "./shell/theme.ts";
 import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
 import { MemoryPanel } from "./memory/MemoryPanel.tsx";
 import { FirstRun } from "./settings/FirstRun.tsx";
@@ -45,11 +50,19 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [opening, setOpening] = useState(false);
-  const [state, dispatch] = useReducer(tabsReduce, NO_TABS);
+  const [state, dispatchTabs] = useReducer(tabsReduce, NO_TABS);
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+  /** When each tab's running turn started, for "a long turn finished" notifications. */
+  const turnStarts = useRef(new Map<string, number>());
+  const dispatch = useCallback((action: TabsAction) => {
+    if (action.type === "thread" && action.action.type === "local/prompt") {
+      turnStarts.current.set(action.key, Date.now());
+    }
+    dispatchTabs(action);
+  }, []);
 
   const refreshSessions = useCallback(() => {
     listSessions().then(setSessions, (e: unknown) =>
@@ -72,6 +85,25 @@ export function App() {
     refreshModel();
     refreshSessions();
   }, [refreshModel, refreshSessions]);
+
+  const theme = settingsState?.settings?.ui.theme;
+  useEffect(() => {
+    if (theme) applyTheme(theme);
+  }, [theme]);
+
+  // A click on a notification about a tab shows that tab (Rust brings the window forward).
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let gone = false;
+    onActivateTab((key) => dispatch({ type: "activate", key })).then(
+      (unlisten) => (gone ? unlisten() : (stop = unlisten)),
+      () => {},
+    );
+    return () => {
+      gone = true;
+      stop?.();
+    };
+  }, [dispatch]);
 
   /** Settings were saved (or set up): new threads use them. */
   const settingsSaved = useCallback(
@@ -105,6 +137,26 @@ export function App() {
       folderName(tab.workspace),
     [titles],
   );
+  const titleOfRef = useRef(titleOf);
+  useEffect(() => {
+    titleOfRef.current = titleOf;
+  }, [titleOf]);
+
+  /** Tell the user about `event` of tab `key` when they cannot see it (shell/notify.ts). */
+  const maybeNotify = useCallback((key: string, event: DesktopEvent) => {
+    const tab = stateRef.current.tabs.find((t) => t.key === key);
+    if (!tab) return;
+    const started = turnStarts.current.get(key);
+    const ended = event.type === "turnEnded" || event.type === "turnFailed";
+    if (ended) turnStarts.current.delete(key);
+    const notice = notificationFor(event, {
+      tab: titleOfRef.current(tab),
+      background: stateRef.current.active !== key || !document.hasFocus(),
+      turnSeconds: started === undefined ? null : (Date.now() - started) / 1000,
+    });
+    if (notice) void notify(notice.title, notice.body, key).catch(() => {});
+  }, []);
+
   const openSessions = useMemo(
     () => new Set(state.tabs.flatMap((t) => (t.opened ? [t.opened.sessionId] : []))),
     [state.tabs],
@@ -120,6 +172,7 @@ export function App() {
       try {
         const onEvent = (event: DesktopEvent) => {
           dispatch({ type: "thread", key, action: event });
+          maybeNotify(key, event);
           // A finished turn may have saved a new session or titled one.
           if (event.type === "turnEnded" || event.type === "turnFailed") refreshSessions();
         };
@@ -132,7 +185,7 @@ export function App() {
         setOpening(false);
       }
     },
-    [refreshSessions],
+    [refreshSessions, dispatch, maybeNotify],
   );
 
   const newThread = useCallback(async () => {
@@ -160,14 +213,73 @@ export function App() {
         setError(String(e));
       }
     },
-    [open],
+    [open, dispatch],
   );
 
-  const close = useCallback((key: string) => {
-    const tab = stateRef.current.tabs.find((t) => t.key === key);
-    if (tab?.opened) void closeThread(tab.opened.threadId).catch(() => {});
-    dispatch({ type: "close", key });
-  }, []);
+  const close = useCallback(
+    (key: string) => {
+      const tab = stateRef.current.tabs.find((t) => t.key === key);
+      if (tab?.opened) void closeThread(tab.opened.threadId).catch(() => {});
+      turnStarts.current.delete(key);
+      dispatch({ type: "close", key });
+    },
+    [dispatch],
+  );
+
+  const toggleSettings = useCallback(
+    () => (showSettings ? setShowSettings(false) : openSettings()),
+    [showSettings, openSettings],
+  );
+
+  // Keyboard shortcuts (shell/shortcuts.ts), anywhere in the window.
+  const hasSettings = Boolean(settingsState?.settings);
+  const canOpen = !opening && !!model && !model.problem;
+  useEffect(() => {
+    if (!hasSettings) return;
+    const mac = isMac();
+    const onKey = (event: KeyboardEvent) => {
+      const shortcut = shortcutFor(event, mac);
+      if (!shortcut) return;
+      const { tabs, active } = stateRef.current;
+      const current = tabs.find((t) => t.key === active);
+      switch (shortcut.type) {
+        case "newThread":
+          if (canOpen) void newThread();
+          break;
+        case "closeTab":
+          if (current) close(current.key);
+          break;
+        case "focusPrompt":
+          setShowSettings(false);
+          document
+            .querySelector<HTMLTextAreaElement>(
+              `[data-tab="${active ?? ""}"] textarea[data-prompt-input]`,
+            )
+            ?.focus();
+          break;
+        case "stopTurn":
+          if (current?.opened && current.session.running && !current.session.cancelling) {
+            dispatch({ type: "thread", key: current.key, action: { type: "local/cancelling" } });
+            void cancelTurn(current.opened.threadId).catch(() => {});
+          }
+          break;
+        case "settings":
+          toggleSettings();
+          break;
+        default: {
+          const key = tabTarget(
+            shortcut,
+            tabs.map((t) => t.key),
+            active,
+          );
+          if (key) dispatch({ type: "activate", key });
+        }
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasSettings, canOpen, newThread, close, toggleSettings, dispatch]);
 
   const rename = useCallback(
     (key: string, title: string) => {
@@ -182,7 +294,7 @@ export function App() {
           dispatch({ type: "thread", key, action: { type: "local/warning", text: String(e) } }),
       );
     },
-    [refreshSessions],
+    [refreshSessions, dispatch],
   );
 
   if (settingsState && !settingsState.settings) {
@@ -205,7 +317,7 @@ export function App() {
         onNew={() => void newThread()}
         onOpen={(session) => void reopen(session)}
         onRefresh={refreshSessions}
-        onSettings={() => (showSettings ? setShowSettings(false) : openSettings())}
+        onSettings={toggleSettings}
         settingsOpen={showSettings}
         onMemory={() => setShowMemory((open) => !open)}
         memoryOpen={showMemory}
@@ -234,7 +346,12 @@ export function App() {
         )}
         <div className="relative min-h-0 flex-1">
           {state.tabs.map((tab) => (
-            <div key={tab.key} className="absolute inset-0" hidden={tab.key !== state.active}>
+            <div
+              key={tab.key}
+              data-tab={tab.key}
+              className="absolute inset-0"
+              hidden={tab.key !== state.active}
+            >
               {tab.opened ? (
                 <TabView tab={tab} dispatchTab={dispatch} onMemory={() => setShowMemory(true)} />
               ) : (

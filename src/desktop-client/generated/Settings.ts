@@ -9,6 +9,7 @@ import type { ModelSettings } from "./ModelSettings";
 import type { ProviderSettings } from "./ProviderSettings";
 import type { SkillSettings } from "./SkillSettings";
 import type { ToolSettings } from "./ToolSettings";
+import type { UiSettings } from "./UiSettings";
 
 export type Settings = { version: number, model: ModelSettings, 
 /**
@@ -16,6 +17,10 @@ export type Settings = { version: number, model: ModelSettings,
  * also the keyring account its API key is stored under, as in the CLI.
  */
 providers: { [key in string]: ProviderSettings }, limits: LimitSettings, guardrails: GuardrailSettings, mcpServers: { [key in string]: McpServerSettings }, agents: AgentSettings, skills: SkillSettings, memory: MemorySettings, tools: ToolSettings, 
+/**
+ * How the app itself looks and behaves: theme, notifications, tray icon.
+ */
+ui: UiSettings, 
 /**
  * USD per million tokens by `provider:model` (or bare model id), for models agent86 has no
  * built-in price for. Imported from the CLI's `[pricing.models]`.

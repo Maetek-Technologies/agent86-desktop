@@ -16,8 +16,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# The tray icon (src/desktop.rs) is optional at run time, off by default.
+tauri = { version = "2", features = ["tray-icon"] }
+# Plugins are used from Rust only; the webview is granted none of their permissions
+# (capabilities/default.json, docs/PROJECT_PLAN.md section 5).
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
 # Pinned exactly: a few things the app must do as the CLI does sit outside the crate's semver
 # promise (the keyring layout, the embedder, the context-window and price tables, `Memory::store()`;
 # docs/PROJECT_PLAN.md D2, risks), all in src/unstable.rs. Default features stay on: the OS

@@ -4,6 +4,8 @@
 
 use crate::agent_factory;
 use crate::cli_import::{self, ImportPreview};
+use crate::desktop;
+use crate::file_actions;
 use crate::keys::{self, KeyStatus, OsKeys};
 use crate::sessions::{SessionList, Sessions};
 use crate::settings::{self, ProviderPreset, ProviderSettings, Settings, SettingsStore};
@@ -153,7 +155,9 @@ pub fn get_settings(app: tauri::AppHandle) -> SettingsState {
 /// Check and keep `settings`; threads opened from now on use them. Fails listing every problem.
 #[tauri::command]
 pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
-    app.state::<SettingsStore>().save(settings)
+    let saved = app.state::<SettingsStore>().save(settings)?;
+    desktop::apply_ui(&app, &saved.ui);
+    Ok(saved)
 }
 
 /// What importing the agent86 CLI's config would give. Nothing is kept until it is saved.
@@ -286,6 +290,7 @@ fn open_thread_blocking(
     };
     let resume = session_id.clone();
     let mut builder = setup.plan.builder;
+    let app_for_events = app.clone();
 
     let opened = threads.open(
         Box::new(move || {
@@ -298,8 +303,15 @@ fn open_thread_blocking(
             Ok(builder)
         }),
         Arc::new(move |event| {
+            let ended = matches!(
+                event,
+                DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. }
+            );
             // A send fails only when the page has gone; the thread goes on regardless.
             let _ = on_event.send(event);
+            if ended {
+                desktop::refresh_tray(&app_for_events);
+            }
         }),
         workspace.clone(),
         settings.tools.mention_max_bytes,
@@ -442,11 +454,14 @@ pub async fn rename_session(
 /// Start a turn: a message (with its `@` mentions inlined), a skill, or a specialist.
 #[tauri::command]
 pub fn prompt(
+    app: tauri::AppHandle,
     threads: State<'_, ThreadManager>,
     thread_id: String,
     turn: TurnRequest,
 ) -> Result<(), String> {
-    threads.prompt(&thread_id, turn)
+    threads.prompt(&thread_id, turn)?;
+    desktop::refresh_tray(&app);
+    Ok(())
 }
 
 /// Workspace files matching `query`, for the `@` menu.
@@ -476,8 +491,67 @@ pub fn answer(
 }
 
 #[tauri::command]
-pub fn close_thread(threads: State<'_, ThreadManager>, thread_id: String) -> Result<(), String> {
-    threads.close(&thread_id)
+pub fn close_thread(
+    app: tauri::AppHandle,
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+) -> Result<(), String> {
+    threads.close(&thread_id)?;
+    desktop::refresh_tray(&app);
+    Ok(())
+}
+
+/// Show a desktop notification, unless notifications are off in Settings. Clicking it brings the
+/// app forward on tab `tab` (the webview's own key for it).
+#[tauri::command]
+pub fn notify(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+    tab: Option<String>,
+) -> Result<(), String> {
+    let enabled = app
+        .state::<SettingsStore>()
+        .get()
+        .ok()
+        .flatten()
+        .is_none_or(|settings| settings.ui.notifications);
+    if !enabled {
+        return Ok(());
+    }
+    desktop::notify(&app, &title, &body, tab)
+}
+
+/// Open `path` with its default app, or with `reveal`, show it in Explorer or Finder. Only files
+/// inside thread `thread_id`'s workspace, or a worktree its sub-agents kept, and never a program
+/// or script by opening it.
+#[tauri::command]
+pub async fn open_path(
+    app: tauri::AppHandle,
+    thread_id: String,
+    path: String,
+    reveal: bool,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let roots = app.state::<ThreadManager>().file_roots(&thread_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = file_actions::resolve(&path, &roots)?;
+        if !reveal && file_actions::runs_when_opened(&resolved) {
+            return Err(format!(
+                "{path} would run if opened, so the app only reveals it in the file manager."
+            ));
+        }
+        let shown = file_actions::shown(resolved);
+        let opener = app.opener();
+        if reveal {
+            opener.reveal_item_in_dir(&shown)
+        } else {
+            opener.open_path(shown.display().to_string(), None::<&str>)
+        }
+        .map_err(|error| format!("{}: {error}", shown.display()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// An existing directory, made absolute with symlinks followed, as agent86-core's jail sees it.
@@ -494,7 +568,7 @@ fn resolve_workspace(raw: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(windows)]
-fn strip_verbatim(path: PathBuf) -> PathBuf {
+pub(crate) fn strip_verbatim(path: PathBuf) -> PathBuf {
     let text = path.display().to_string();
     match text.strip_prefix(r"\\?\") {
         Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
@@ -503,7 +577,7 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
 }
 
 #[cfg(not(windows))]
-fn strip_verbatim(path: PathBuf) -> PathBuf {
+pub(crate) fn strip_verbatim(path: PathBuf) -> PathBuf {
     path
 }
 

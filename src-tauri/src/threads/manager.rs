@@ -1,6 +1,7 @@
 //! The app's threads, by id, with the workspace each one runs in.
 
 use super::actor::{Capabilities, EventSink, MakeBuilder, ThreadHandle, ThreadOptions};
+use super::events::{DesktopEvent, SubagentUpdate};
 use super::history::HistoryItem;
 use super::questions::Answer;
 use crate::workspace_files;
@@ -57,6 +58,9 @@ struct Thread {
     handle: Arc<ThreadHandle>,
     workspace: PathBuf,
     mention_max_bytes: u64,
+    /// The git worktrees isolated sub-agents of this thread left behind (agent86's `[worktree]`
+    /// note), so their files can be opened as the workspace's can.
+    worktrees: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 #[derive(Default)]
@@ -91,7 +95,8 @@ impl ThreadManager {
                 }
             }
         }
-        let handle = ThreadHandle::spawn(make, sink, options)?;
+        let worktrees = Arc::new(Mutex::new(Vec::new()));
+        let handle = ThreadHandle::spawn(make, record_worktrees(sink, worktrees.clone()), options)?;
         let capabilities = handle.capabilities();
         let loaded_secrets = handle.loaded_secrets().to_vec();
         let session_id = handle.session_id().to_owned();
@@ -103,6 +108,7 @@ impl ThreadManager {
                 handle: Arc::new(handle),
                 workspace,
                 mention_max_bytes,
+                worktrees,
             },
         );
         Ok(Opened {
@@ -164,6 +170,31 @@ impl ThreadManager {
         self.with(id, |thread| Ok(thread.workspace.clone()))
     }
 
+    /// The folders thread `id` may open files in: its workspace, then the worktrees its
+    /// sub-agents kept.
+    pub fn file_roots(&self, id: &str) -> Result<Vec<PathBuf>, String> {
+        self.with(id, |thread| {
+            let mut roots = vec![thread.workspace.clone()];
+            roots.extend(
+                thread
+                    .worktrees
+                    .lock()
+                    .map(|w| w.clone())
+                    .unwrap_or_default(),
+            );
+            Ok(roots)
+        })
+    }
+
+    /// The workspaces of the threads running a turn now, for the tray.
+    pub fn running(&self) -> Vec<PathBuf> {
+        self.lock()
+            .values()
+            .filter(|thread| thread.handle.is_busy())
+            .map(|thread| thread.workspace.clone())
+            .collect()
+    }
+
     /// Rebuild thread `id`'s agent from `make`, keeping its conversation and secrets. Only
     /// between turns. The agent is built outside the map's lock.
     pub fn reload(&self, id: &str, make: MakeBuilder) -> Result<Capabilities, String> {
@@ -195,6 +226,41 @@ impl ThreadManager {
     }
 }
 
+/// `sink`, noting in `worktrees` every worktree a sub-agent's result says was kept, its own or
+/// a nested one's.
+fn record_worktrees(sink: EventSink, worktrees: Arc<Mutex<Vec<PathBuf>>>) -> EventSink {
+    Arc::new(move |event| {
+        let output = match &event {
+            DesktopEvent::ToolResult { output, .. } => Some(output),
+            DesktopEvent::Subagent {
+                update: SubagentUpdate::ToolResult { output, .. },
+                ..
+            } => Some(output),
+            _ => None,
+        };
+        if let Some(path) = output.and_then(|output| kept_worktree(output)) {
+            if let Ok(mut kept) = worktrees.lock() {
+                if !kept.contains(&path) {
+                    kept.push(path);
+                }
+            }
+        }
+        sink(event)
+    })
+}
+
+/// Where agent86's `[worktree]` note in `output` says the worktree is kept, if it says so.
+pub fn kept_worktree(output: &str) -> Option<PathBuf> {
+    let note = output.find("[worktree] This ran in a git worktree")?;
+    let rest = &output[note..];
+    const KEPT: &str = "the worktree is kept at ";
+    let start = rest.find(KEPT)? + KEPT.len();
+    let rest = &rest[start..];
+    let end = rest.find(" on branch ")?;
+    let path = rest[..end].trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
 fn unknown(id: &str) -> String {
     format!("No thread with id {id:?}.")
 }
@@ -202,6 +268,28 @@ fn unknown(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kept_worktrees_are_read_from_agent86s_note() {
+        let output = "Done.
+
+[worktree] This ran in a git worktree of HEAD (abc1234), not in                       your workspace. Nothing was applied: the worktree is kept at                       /tmp/agent86-wt-1-0-2/sub on branch agent86/wt-1. Its changes:
+```diff
+```";
+        assert_eq!(
+            kept_worktree(output),
+            Some(PathBuf::from("/tmp/agent86-wt-1-0-2/sub"))
+        );
+        // One that changed nothing was removed; a mention elsewhere does not count.
+        assert_eq!(
+            kept_worktree("[worktree] This ran in a git worktree of HEAD (a). It changed nothing."),
+            None
+        );
+        assert_eq!(
+            kept_worktree("the worktree is kept at /x on branch y"),
+            None
+        );
+    }
 
     #[test]
     fn turn_requests_deserialize_from_the_ui_shape() {

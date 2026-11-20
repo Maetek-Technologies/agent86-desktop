@@ -1,5 +1,5 @@
 //! The app's own settings (docs/PROJECT_PLAN.md D3): providers and models, triage, limits,
-//! guardrails, MCP servers, sub-agents, skills, and memory, kept as JSON in
+//! guardrails, MCP servers, sub-agents, skills, memory, and the app's look, kept as JSON in
 //! `{app config dir}/settings.json`.
 //!
 //! The defaults are agent86's built-in ones, so a value the user never touched behaves as it does
@@ -34,6 +34,8 @@ pub struct Settings {
     pub skills: SkillSettings,
     pub memory: MemorySettings,
     pub tools: ToolSettings,
+    /// How the app itself looks and behaves: theme, notifications, tray icon.
+    pub ui: UiSettings,
     /// USD per million tokens by `provider:model` (or bare model id), for models agent86 has no
     /// built-in price for. Imported from the CLI's `[pricing.models]`.
     pub pricing: BTreeMap<String, ModelPrice>,
@@ -54,6 +56,7 @@ impl Default for Settings {
             skills: SkillSettings::default(),
             memory: MemorySettings::default(),
             tools: ToolSettings::default(),
+            ui: UiSettings::default(),
             pricing: BTreeMap::new(),
             imported_from: None,
         }
@@ -530,6 +533,39 @@ impl Default for ToolSettings {
     fn default() -> Self {
         Self {
             mention_max_bytes: 200_000,
+        }
+    }
+}
+
+/// The app's colours: the system's, or always light or dark.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct UiSettings {
+    pub theme: Theme,
+    /// Notify when an approval or question waits, or a long turn finishes, while the app or
+    /// that tab is not in front.
+    pub notifications: bool,
+    /// Show a tray (menu bar) icon with the number of running turns.
+    pub tray: bool,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            theme: Theme::System,
+            notifications: true,
+            tray: false,
         }
     }
 }

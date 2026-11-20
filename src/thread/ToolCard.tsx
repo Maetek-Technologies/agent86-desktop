@@ -4,6 +4,7 @@ import { Highlight } from "../highlight/Highlight.tsx";
 import { languageForPath } from "../highlight/languages.ts";
 import { argumentSummary, splitResult } from "../tools/approval.ts";
 import { DiffView } from "../tools/DiffView.tsx";
+import { FileActions } from "../tools/FileActions.tsx";
 import { relativePath } from "../tools/paths.ts";
 import { parseWorktree } from "../tools/worktree.ts";
 import { SubagentActivityView, WorktreeView } from "./SubagentView.tsx";
@@ -151,6 +152,7 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
             {relativePath(path, cwd)}
           </span>
           <CopyButton text={path} label="path" />
+          <FileActions path={path} />
         </div>
       )}
       {entry.subagent && <SubagentActivityView activity={entry.subagent} />}

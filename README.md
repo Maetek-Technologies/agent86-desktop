@@ -5,7 +5,7 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M6.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
+> **Status: M7.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
 > with diffs, approvals, limit raises, secret prompts, `/` commands, `@` file mentions, and a
 > context meter. Sessions are saved to the memory database the agent86 CLI uses
 > (`~/.agent86/memory.db`), listed in the sidebar, and can be reopened and renamed. The app has
@@ -13,8 +13,11 @@ Rust back end that embeds the agent in-process through
 > first run by importing your agent86 CLI config or choosing a provider. A memory panel shows
 > and pins what the agent remembers, a secrets panel manages each thread's secrets, a project's
 > own skills, specialists, and MCP servers load once you trust them, and sub-agents' work
-> (including isolated runs in git worktrees) shows on their delegation's card. The plan and
-> milestones are in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+> (including isolated runs in git worktrees) shows on their delegation's card. It notifies you
+> when a background thread needs you or a long turn ends, remembers its window, runs as a single
+> instance, can show a tray icon with the running turns, opens or reveals the files tool cards
+> show, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance). The
+> plan and milestones are in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Settings and keys
 
@@ -34,9 +37,16 @@ Rust back end that embeds the agent in-process through
 - **Project trust:** a workspace's `.agent86/skills`, `.claude/skills`, `.agent86/agents`, and
   the MCP servers in its `.agent86/config.toml` load only after you review and trust them, and
   again after any change. Trusted projects are listed in Settings, Projects.
+- **Open and reveal** on a tool card work only for files inside the thread's workspace or a
+  worktree its sub-agents kept. Programs and scripts (`.exe`, `.bat`, `.sh`, `.app`, ...) are only
+  revealed in Explorer or Finder, never opened.
+- **Appearance** (Settings): theme, notifications, and the tray icon. The window's size and place
+  are kept in `window-state.json` beside `settings.json`.
 - To try the app without touching your real settings (a first run, say), start it with
-  `AGENT86_DESKTOP_CONFIG_DIR` set to another folder. Sessions still go to the memory database
-  in your home folder unless `USERPROFILE` (Windows) or `HOME` points elsewhere too.
+  `AGENT86_DESKTOP_CONFIG_DIR` set to another folder; it then runs as an instance of its own.
+  Sessions still go to the memory database in your home folder unless `USERPROFILE` (Windows) or
+  `HOME` points elsewhere too. On Windows, point `APPDATA` and `LOCALAPPDATA` into that profile
+  as well, or Tauri cannot find its own folders and the window's place is not kept.
 
 ## Prerequisites
 

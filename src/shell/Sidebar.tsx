@@ -1,4 +1,5 @@
 import type { SessionList, SessionSummary } from "../desktop-client/events.ts";
+import { modLabel } from "./shortcuts.ts";
 import { folderName } from "./tabs.ts";
 
 /** "just now", "5 min ago", "3 h ago", "yesterday", or a date. */
@@ -50,6 +51,7 @@ export function Sidebar({
           type="button"
           onClick={onNew}
           disabled={busy}
+          title={`New thread (${modLabel()}T)`}
           className="flex-1 rounded bg-accent px-2 py-1 text-sm font-medium text-bg disabled:opacity-50"
         >
           New thread…
@@ -124,6 +126,7 @@ export function Sidebar({
           type="button"
           onClick={onSettings}
           aria-pressed={settingsOpen}
+          title={`Settings (${modLabel()},)`}
           className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-panel-2 ${
             settingsOpen ? "bg-panel-2 text-text" : "text-muted"
           }`}

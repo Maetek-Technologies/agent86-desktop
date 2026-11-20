@@ -371,7 +371,7 @@ impl ThreadHandle {
         }
     }
 
-    #[cfg(test)]
+    /// A turn (or a reload) is running.
     pub fn is_busy(&self) -> bool {
         self.shared.busy.load(Ordering::SeqCst)
     }

@@ -102,6 +102,7 @@ function defaults(): Settings {
       retentionMaxAgeDays: 0,
     },
     tools: { mentionMaxBytes: 200000 },
+    ui: { theme: "system", notifications: true, tray: false },
     pricing: {},
     importedFrom: null,
   };
@@ -261,6 +262,59 @@ test("closes a tab and its thread", async () => {
   await screen.findByLabelText("Prompt");
   fireEvent.click(await screen.findByRole("button", { name: /Close demo/ }));
   expect(screen.queryByRole("tab")).toBeNull();
+  expect(calls.find((c) => c.cmd === "close_thread")?.args).toMatchObject({ threadId: "t1" });
+});
+
+test("shortcuts open, switch, and close tabs; a question in a hidden tab notifies", async () => {
+  const channels = new Map<string, { onmessage: (event: unknown) => void }>();
+  const calls = backend((cmd, args) => {
+    if (cmd === "notify") return null;
+    if (cmd === "open_thread") {
+      const id = `t${channels.size + 1}`;
+      channels.set(id, args.onEvent as { onmessage: (event: unknown) => void });
+      return opened(id, `/code/ws${channels.size}`, `s${channels.size}`);
+    }
+    return undefined;
+  });
+  render(<App />);
+  const choose = (await screen.findByRole("button", {
+    name: /Choose a workspace/,
+  })) as HTMLButtonElement;
+  await waitFor(() => expect(choose.disabled).toBe(false));
+  fireEvent.keyDown(window, { key: "t", ctrlKey: true });
+  expect(await screen.findByRole("tab", { name: /ws1/ })).toBeTruthy();
+  fireEvent.keyDown(window, { key: "t", ctrlKey: true });
+  const second = await screen.findByRole("tab", { name: /ws2/ });
+  await waitFor(() => expect(second.getAttribute("aria-selected")).toBe("true"));
+
+  // The first tab is hidden now: its approval request becomes a notification.
+  channels.get("t1")!.onmessage({
+    type: "approvalRequest",
+    qid: 1,
+    tool: "write_file",
+    preview: {
+      summary: "{}",
+      detail: null,
+      lexer: null,
+      warning: null,
+      full: false,
+      change: null,
+      asker: null,
+    },
+  });
+  await waitFor(() =>
+    expect(calls.find((c) => c.cmd === "notify")?.args).toMatchObject({
+      title: "Approval needed",
+      body: "ws1: The agent wants to run write_file.",
+    }),
+  );
+
+  fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: /ws1/ }).getAttribute("aria-selected")).toBe("true"),
+  );
+  fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+  await waitFor(() => expect(screen.queryByRole("tab", { name: /ws1/ })).toBeNull());
   expect(calls.find((c) => c.cmd === "close_thread")?.args).toMatchObject({ threadId: "t1" });
 });
 

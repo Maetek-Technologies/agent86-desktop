@@ -1,6 +1,8 @@
 mod agent_factory;
 mod cli_import;
 mod commands;
+mod desktop;
+mod file_actions;
 mod keys;
 mod memory_panel;
 mod panel_commands;
@@ -15,16 +17,46 @@ mod workspace_files;
 use tauri::Manager;
 
 pub fn run() {
-    tauri::Builder::default()
+    let config_override = config_override();
+    let mut builder = tauri::Builder::default();
+    // A second launch brings the running app forward instead of opening another window. A
+    // separate config folder (AGENT86_DESKTOP_CONFIG_DIR) is a separate profile, so it runs as
+    // an instance of its own. The plugin must be registered first.
+    if config_override.is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            desktop::show_main(app)
+        }));
+    }
+    // The window's size and place are kept beside the settings (an absolute file name replaces
+    // the plugin's own folder, so a separate profile keeps its own).
+    let window_state_file = match &config_override {
+        Some(dir) => dir.join("window-state.json").display().to_string(),
+        None => "window-state.json".to_owned(),
+    };
+    builder
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_filename(window_state_file)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(threads::ThreadManager::default())
-        .setup(|app| {
+        .manage(desktop::Desktop::default())
+        .setup(move |app| {
             // Without a config folder (an unusual profile) the app still runs; it just does not
             // remember its settings or which folder each session ran in.
-            let config_dir = config_dir(app);
-            app.manage(settings::SettingsStore::open(config_dir.as_deref()));
+            let config_dir = config_override
+                .clone()
+                .or_else(|| app.path().app_config_dir().ok());
+            let store = settings::SettingsStore::open(config_dir.as_deref());
+            let ui = store.get().ok().flatten().map(|s| s.ui).unwrap_or_default();
+            app.manage(store);
             app.manage(sessions::Sessions::new(config_dir.as_deref()));
             app.manage(trust::TrustStore::open(config_dir.as_deref()));
+            desktop::apply_ui(app.handle(), &ui);
+            desktop::listen_for_notification_clicks(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,6 +79,8 @@ pub fn run() {
             commands::answer,
             commands::close_thread,
             commands::reload_thread,
+            commands::notify,
+            commands::open_path,
             panel_commands::list_memory,
             panel_commands::pin_memory,
             panel_commands::forget_memory,
@@ -62,11 +96,10 @@ pub fn run() {
         .expect("error while running agent86-desktop");
 }
 
-/// The app's config folder: `AGENT86_DESKTOP_CONFIG_DIR` when set (for trying the app without
-/// touching its real settings, such as a first run), else the platform's.
-fn config_dir(app: &tauri::App) -> Option<std::path::PathBuf> {
+/// `AGENT86_DESKTOP_CONFIG_DIR`, when set: a config folder used instead of the platform's (for
+/// trying the app without touching its real settings, such as a first run).
+fn config_override() -> Option<std::path::PathBuf> {
     std::env::var_os("AGENT86_DESKTOP_CONFIG_DIR")
         .filter(|dir| !dir.is_empty())
         .map(std::path::PathBuf::from)
-        .or_else(|| app.path().app_config_dir().ok())
 }
