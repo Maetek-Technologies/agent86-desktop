@@ -126,6 +126,11 @@ export function argumentSummary(name: string | undefined, rawInput: unknown): st
       return first(input.code);
     case "web_fetch":
       return first(input.url);
+    case "delegate":
+    case "agent": {
+      const agent = typeof input.agent === "string" && input.agent ? `${input.agent}: ` : "";
+      return agent + first(input.task);
+    }
     default:
       if (typeof input.path === "string") return input.path;
       if (typeof input.query === "string") return input.query;

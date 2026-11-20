@@ -1,6 +1,6 @@
 // The open threads as tabs: one reducer over all of them, so each thread's events (which arrive
 // keyed by the tab that opened it) fold into the right transcript.
-import type { DesktopEvent, OpenedThread } from "../desktop-client/events.ts";
+import type { DesktopEvent, OpenedThread, ReloadedThread } from "../desktop-client/events.ts";
 import {
   initialState,
   reduce,
@@ -31,6 +31,7 @@ export type TabsAction =
   | { type: "activate"; key: string }
   | { type: "close"; key: string }
   | { type: "title"; key: string; title: string }
+  | { type: "reloaded"; key: string; reloaded: ReloadedThread }
   | { type: "thread"; key: string; action: DesktopEvent | LocalAction };
 
 export const NO_TABS: TabsState = { tabs: [], active: null };
@@ -78,6 +79,10 @@ export function tabsReduce(state: TabsState, action: TabsAction): TabsState {
         : state;
     case "title":
       return update(state, action.key, (tab) => ({ ...tab, title: action.title }));
+    case "reloaded":
+      return update(state, action.key, (tab) =>
+        tab.opened ? { ...tab, opened: { ...tab.opened, ...action.reloaded } } : tab,
+      );
     case "thread":
       return update(state, action.key, (tab) => ({
         ...tab,

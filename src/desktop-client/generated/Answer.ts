@@ -4,4 +4,4 @@ import type { ApprovalChoice } from "./ApprovalChoice";
 /**
  * The user's answer to one question, as the UI sends it.
  */
-export type Answer = { "type": "approval", choice: ApprovalChoice, } | { "type": "limit", value: number | null, } | { "type": "secret", value: string | null, };
+export type Answer = { "type": "approval", choice: ApprovalChoice, } | { "type": "limit", value: number | null, } | { "type": "secret", value: string | null, remember: boolean, };

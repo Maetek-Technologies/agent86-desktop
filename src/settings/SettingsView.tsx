@@ -1,11 +1,18 @@
-import { useState } from "react";
-import { previewCliImport, saveSettings, testModel } from "../desktop-client/backend.ts";
+import { useEffect, useState } from "react";
+import {
+  forgetTrust,
+  previewCliImport,
+  saveSettings,
+  testModel,
+  trustedProjects,
+} from "../desktop-client/backend.ts";
 import type {
   ImportPreview,
   McpServerSettings,
   McpTransport,
   Settings,
   SettingsState,
+  TrustedProject,
 } from "../desktop-client/events.ts";
 import {
   buttonClass,
@@ -30,7 +37,15 @@ import {
   validServerName,
 } from "./settings-model.ts";
 
-const SECTIONS = ["Model", "Providers", "Limits", "Guardrails", "MCP servers", "Memory"] as const;
+const SECTIONS = [
+  "Model",
+  "Providers",
+  "Limits",
+  "Guardrails",
+  "MCP servers",
+  "Memory",
+  "Projects",
+] as const;
 type SectionName = (typeof SECTIONS)[number];
 
 /**
@@ -135,6 +150,7 @@ export function SettingsView({
             {section === "Memory" && (
               <MemorySection state={state} draft={draft} onChange={change} />
             )}
+            {section === "Projects" && <ProjectsSection />}
           </div>
         </main>
       </div>
@@ -690,5 +706,49 @@ export function ImportSummary({
         </button>
       </div>
     </div>
+  );
+}
+
+/** The projects whose skills, specialists, and MCP servers the user trusted. */
+function ProjectsSection() {
+  const [list, setList] = useState<TrustedProject[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    trustedProjects().then(setList, (e: unknown) => setProblem(String(e)));
+  }, []);
+  return (
+    <Section
+      title="Trusted projects"
+      intro="A project's own skills, specialists, and MCP servers load only once you trust them, and again after any change to them. Stopping trust takes effect for threads opened or reloaded afterwards."
+    >
+      {list && list.length === 0 && <p className="text-sm text-muted">No trusted projects.</p>}
+      {list && list.length > 0 && (
+        <ul className="space-y-1">
+          {list.map((p) => (
+            <li
+              key={p.workspace}
+              className="flex items-center gap-2 rounded border border-border bg-panel px-3 py-1.5 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono" title={p.sha256}>
+                {p.workspace}
+              </span>
+              <button
+                type="button"
+                className={buttonClass}
+                onClick={() =>
+                  forgetTrust(p.workspace).then(
+                    () => setList((l) => (l ?? []).filter((x) => x.workspace !== p.workspace)),
+                    (e: unknown) => setProblem(String(e)),
+                  )
+                }
+              >
+                Stop trusting
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Problems text={problem} />
+    </Section>
   );
 }

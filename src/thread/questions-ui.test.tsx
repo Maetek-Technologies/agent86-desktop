@@ -101,6 +101,7 @@ describe("SecretPrompt", () => {
         name="API_TOKEN"
         reason="to call the API"
         replacing={false}
+        canRemember={false}
         onEnter={onEnter}
         onDecline={() => {}}
       />,
@@ -109,7 +110,8 @@ describe("SecretPrompt", () => {
     expect(input.type).toBe("password");
     fireEvent.change(input, { target: { value: "hunter2-secret" } });
     fireEvent.submit(screen.getByRole("dialog"));
-    expect(onEnter).toHaveBeenCalledWith("hunter2-secret");
+    expect(onEnter).toHaveBeenCalledWith("hunter2-secret", false);
+    expect(screen.queryByLabelText(/Remember for this project/)).toBeNull();
     expect(input.value).toBe("");
     expect(container.innerHTML).not.toContain("hunter2-secret");
   });
@@ -117,7 +119,16 @@ describe("SecretPrompt", () => {
   it("refuses a value agent86 would refuse, and declines on Esc", () => {
     const onEnter = vi.fn();
     const onDecline = vi.fn();
-    render(<SecretPrompt name="PIN" reason="" replacing onEnter={onEnter} onDecline={onDecline} />);
+    render(
+      <SecretPrompt
+        name="PIN"
+        reason=""
+        replacing
+        canRemember={false}
+        onEnter={onEnter}
+        onDecline={onDecline}
+      />,
+    );
     const input = screen.getByLabelText("Value for PIN");
     fireEvent.change(input, { target: { value: "123" } });
     fireEvent.submit(screen.getByRole("dialog"));
@@ -126,5 +137,25 @@ describe("SecretPrompt", () => {
     expect(screen.getByRole("note").textContent).toContain("replaces it");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onDecline).toHaveBeenCalled();
+  });
+
+  it("can remember the value for the project when there is a keyring", () => {
+    const onEnter = vi.fn();
+    render(
+      <SecretPrompt
+        name="API_TOKEN"
+        reason=""
+        replacing={false}
+        canRemember
+        onEnter={onEnter}
+        onDecline={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Value for API_TOKEN"), {
+      target: { value: "hunter2-secret" },
+    });
+    fireEvent.click(screen.getByLabelText(/Remember for this project/));
+    fireEvent.submit(screen.getByRole("dialog"));
+    expect(onEnter).toHaveBeenCalledWith("hunter2-secret", true);
   });
 });

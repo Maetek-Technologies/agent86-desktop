@@ -7,6 +7,7 @@
 //! answer is refused, so nothing the WebView sends can approve a question that was not asked.
 
 use super::events::DesktopEvent;
+use crate::unstable::ThreadSecrets;
 use agent86_core::sdk::{ApprovalPreview, LimitHit, SecretRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -34,9 +35,12 @@ pub enum Answer {
     Limit {
         value: Option<u32>,
     },
-    /// The secret's value, or `None` to decline.
+    /// The secret's value, or `None` to decline. `remember` also keeps it in the OS keyring for
+    /// the project, where every later thread there (and the CLI) loads it.
     Secret {
         value: Option<String>,
+        #[serde(default)]
+        remember: bool,
     },
 }
 
@@ -80,6 +84,8 @@ pub struct Questions {
     always_allowed: Mutex<HashSet<String>>,
     sink: super::EventSink,
     cancelled: Arc<AtomicBool>,
+    /// The agent's vault, for an answer to keep a secret for the project.
+    secrets: Mutex<ThreadSecrets>,
 }
 
 impl Questions {
@@ -92,7 +98,13 @@ impl Questions {
             always_allowed: Mutex::new(HashSet::new()),
             sink,
             cancelled,
+            secrets: Mutex::new(ThreadSecrets::default()),
         })
+    }
+
+    /// The vault of the agent now asking (set when it is built, and again after a reload).
+    pub fn set_secrets(&self, secrets: ThreadSecrets) {
+        *lock(&self.secrets) = secrets;
     }
 
     /// Deliver the UI's answer to question `qid`.
@@ -150,14 +162,29 @@ impl Questions {
 
     /// The secret hook: the value, or `None` to decline.
     pub fn secret(&self, request: &SecretRequest) -> Option<String> {
+        let secrets = lock(&self.secrets).clone();
         let answer = self.ask(Kind::Secret, |qid| DesktopEvent::SecretRequest {
             qid,
             name: request.name.clone(),
             reason: request.reason.clone(),
             replacing: request.replacing,
+            can_remember: secrets.list().can_remember,
         });
         match answer {
-            Some(Answer::Secret { value: Some(value) }) if !value.is_empty() => Some(value),
+            Some(Answer::Secret {
+                value: Some(value),
+                remember,
+            }) if !value.is_empty() => {
+                if remember {
+                    // Held now, so it can be remembered; agent86 then holds the same value.
+                    if let Err(problem) = secrets.set(&request.name, value.clone(), true) {
+                        (self.sink)(DesktopEvent::Notice {
+                            text: format!("[secret] {problem}"),
+                        });
+                    }
+                }
+                Some(value)
+            }
             _ => None,
         }
     }
@@ -488,6 +515,12 @@ mod tests {
             }
         );
         let answer: Answer = serde_json::from_str(r#"{"type":"secret","value":null}"#).unwrap();
-        assert_eq!(answer, Answer::Secret { value: None });
+        assert_eq!(
+            answer,
+            Answer::Secret {
+                value: None,
+                remember: false
+            }
+        );
     }
 }

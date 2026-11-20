@@ -256,32 +256,9 @@ pub fn convert(text: &str) -> Result<(Settings, Vec<String>), String> {
         guardrails.scan_observations
     );
 
-    // `[mcp.servers.<name>]` and the older `[mcp_servers.<name>]`, the first winning.
-    let mcp_on = file.mcp.enabled.unwrap_or(true);
-    let servers = file.mcp_servers.iter().chain(file.mcp.servers.iter());
-    for (name, server) in servers {
-        if settings.mcp_servers.contains_key(name) {
-            continue;
-        }
-        match mcp_server(server) {
-            Ok(mut converted) => {
-                converted.enabled &= mcp_on;
-                if literal_secret(&converted) {
-                    notes.push(format!(
-                        "MCP server {name} has a token written out in its settings. You can keep \
-                         it in the keyring instead: store it as an entry and write ${{NAME}}."
-                    ));
-                }
-                settings.mcp_servers.insert(name.clone(), converted);
-            }
-            Err(problem) => notes.push(format!("MCP server {name} was skipped: {problem}")),
-        }
-    }
-    if !mcp_on && !settings.mcp_servers.is_empty() {
-        notes.push(
-            "MCP is turned off in the config, so its servers were imported turned off.".into(),
-        );
-    }
+    let (servers, mcp_notes) = servers_of(&file);
+    settings.mcp_servers = servers;
+    notes.extend(mcp_notes);
 
     let agents = &file.agents;
     take!(settings.agents.enabled, agents.enabled);
@@ -330,6 +307,56 @@ pub fn convert(text: &str) -> Result<(Settings, Vec<String>), String> {
         ));
     }
     Ok((settings, notes))
+}
+
+/// The MCP servers a config file's text defines (`[mcp.servers.<name>]` and the older
+/// `[mcp_servers.<name>]`), with notes on any skipped. Only those tables are read.
+pub fn mcp_servers(
+    text: &str,
+) -> Result<(BTreeMap<String, McpServerSettings>, Vec<String>), String> {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Mcp {
+        mcp: FileMcp,
+        mcp_servers: BTreeMap<String, FileMcpServer>,
+    }
+    let file: Mcp = toml::from_str(text).map_err(|error| error.to_string())?;
+    let file = File {
+        mcp: file.mcp,
+        mcp_servers: file.mcp_servers,
+        ..File::default()
+    };
+    Ok(servers_of(&file))
+}
+
+/// `[mcp.servers.<name>]` and the older `[mcp_servers.<name>]`, the first winning.
+fn servers_of(file: &File) -> (BTreeMap<String, McpServerSettings>, Vec<String>) {
+    let mut servers = BTreeMap::new();
+    let mut notes = Vec::new();
+    let mcp_on = file.mcp.enabled.unwrap_or(true);
+    for (name, server) in file.mcp_servers.iter().chain(file.mcp.servers.iter()) {
+        if servers.contains_key(name) {
+            continue;
+        }
+        match mcp_server(server) {
+            Ok(mut converted) => {
+                converted.enabled &= mcp_on;
+                if literal_secret(&converted) {
+                    notes.push(format!(
+                        "MCP server {name} has a token written out in its settings. You can keep                          it in the keyring instead: store it as an entry and write ${{NAME}}."
+                    ));
+                }
+                servers.insert(name.clone(), converted);
+            }
+            Err(problem) => notes.push(format!("MCP server {name} was skipped: {problem}")),
+        }
+    }
+    if !mcp_on && !servers.is_empty() {
+        notes.push(
+            "MCP is turned off in the config, so its servers were imported turned off.".into(),
+        );
+    }
+    (servers, notes)
 }
 
 /// A provider section laid over the built-in one of the same name, its adapter chosen as the

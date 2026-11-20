@@ -6,6 +6,7 @@ import type {
   DesktopEvent,
   HistoryItem,
   LimitInfo,
+  SubagentUpdate,
   TurnInfo,
   UsageInfo,
 } from "./events.ts";
@@ -63,6 +64,37 @@ export interface ToolEntry {
   error?: string | null;
   /** The approval question this call waits on, while it waits. */
   approvalQid?: number;
+  /** What the sub-agent this call started is doing (a `delegate` call, or a `/agent` turn). */
+  subagent?: SubagentActivity;
+}
+
+/** One call a sub-agent made. */
+export interface SubCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  status: ToolStatus;
+  output?: string;
+  truncated?: boolean;
+  error?: string | null;
+}
+
+/** A delegation as its sub-agents report it: the top-level run, and everything nested in it. */
+export interface SubagentActivity {
+  /** The specialist or role of the top-level run. */
+  name: string;
+  task: string;
+  depth: number;
+  /** Runs started on this card and not finished yet (nested ones included). */
+  running: number;
+  /** How the top-level run ended; `null` while it runs. */
+  ok: boolean | null;
+  /** Specialists it delegated to in turn. */
+  nested: string[];
+  calls: SubCall[];
+  notices: string[];
+  /** What the top-level run (and everything under it) used, once it finished. */
+  usage: UsageInfo | null;
 }
 
 /** A list the app shows itself (`/tools`, `/skills`, `/agents`). */
@@ -95,7 +127,14 @@ export type Entry =
 export type Question =
   | { kind: "approval"; qid: number; tool: string; preview: ApprovalInfo }
   | { kind: "limit"; qid: number; limit: LimitInfo }
-  | { kind: "secret"; qid: number; name: string; reason: string; replacing: boolean };
+  | {
+      kind: "secret";
+      qid: number;
+      name: string;
+      reason: string;
+      replacing: boolean;
+      canRemember: boolean;
+    };
 
 export interface SessionState {
   entries: Entry[];
@@ -133,6 +172,8 @@ export type LocalAction =
   | { type: "local/error"; text: string }
   /** A problem that does not end the turn, such as an answer Rust refused. */
   | { type: "local/warning"; text: string }
+  /** Something the app did to the thread, such as a reload. */
+  | { type: "local/notice"; text: string }
   | { type: "local/reset" }
   | { type: "local/list"; title: string; items: string[] }
   /** A reopened session's conversation, shown before anything new. */
@@ -162,6 +203,8 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
       return push(state, (id) => ({ kind: "list", id, title: action.title, items: action.items }));
     case "local/warning":
       return push(state, (id) => ({ kind: "error", id, text: action.text }));
+    case "local/notice":
+      return push(state, (id) => ({ kind: "notice", id, text: action.text }));
     case "agentText":
       return appendText(state, "agent", action.text);
     case "thought":
@@ -220,11 +263,14 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
             name: action.name,
             reason: action.reason,
             replacing: action.replacing,
+            canRemember: action.canRemember,
           },
         ],
       };
     case "questionClosed":
       return closeQuestion(state, action.qid);
+    case "subagent":
+      return subagent(state, action.card, action.announced, action.update);
     case "usage":
       return { ...state, usage: action.session, lastStep: action.step };
     case "turnEnded": {
@@ -279,17 +325,138 @@ function appendText(state: SessionState, kind: "agent" | "thought", text: string
   return push(state, (id) => ({ kind, id, text }));
 }
 
-/** A turn that ended (or was cancelled) leaves no tool card spinning. */
+/** A turn that ended (or was cancelled) leaves no tool card, or sub-agent call, spinning. */
 function settleTools(state: SessionState): SessionState {
-  if (!state.entries.some((e) => e.kind === "tool" && e.status === "running")) return state;
+  const spinning = (e: Entry) =>
+    e.kind === "tool" &&
+    (e.status === "running" || e.subagent?.calls.some((c) => c.status === "running"));
+  if (!state.entries.some(spinning)) return state;
   return {
     ...state,
-    entries: state.entries.map((entry) =>
-      entry.kind === "tool" && entry.status === "running"
-        ? { ...entry, status: "failed", error: entry.error ?? "did not finish" }
-        : entry,
-    ),
+    entries: state.entries.map((entry) => {
+      if (entry.kind !== "tool" || !spinning(entry)) return entry;
+      const settled: ToolEntry =
+        entry.status === "running"
+          ? { ...entry, status: "failed", error: entry.error ?? "did not finish" }
+          : entry;
+      if (!settled.subagent) return settled;
+      return {
+        ...settled,
+        subagent: {
+          ...settled.subagent,
+          running: 0,
+          calls: settled.subagent.calls.map((c) =>
+            c.status === "running" ? { ...c, status: "failed", error: "did not finish" } : c,
+          ),
+        },
+      };
+    }),
   };
+}
+
+/**
+ * Fold a sub-agent's update into the card it reports on: the `delegate` call that started it, or,
+ * for a `/agent` turn (`announced` false), a card of its own made when it starts.
+ */
+function subagent(
+  state: SessionState,
+  card: string,
+  announced: boolean,
+  update: SubagentUpdate,
+): SessionState {
+  let current = state;
+  if (!current.entries.some((e) => e.kind === "tool" && e.toolCallId === card)) {
+    if (announced || update.type !== "started") return state;
+    current = push(current, (id) => ({
+      kind: "tool",
+      id,
+      toolCallId: card,
+      name: "agent",
+      title: `agent ${update.name}`,
+      arguments: { agent: update.name, task: update.task },
+      status: "running",
+    }));
+  }
+  return {
+    ...current,
+    entries: current.entries.map((entry) => {
+      if (entry.kind !== "tool" || entry.toolCallId !== card) return entry;
+      const activity = applySubagent(entry.subagent, update);
+      const ended = !announced && update.type === "finished" && activity.ok !== null;
+      return ended
+        ? { ...entry, subagent: activity, status: activity.ok ? "completed" : "failed" }
+        : { ...entry, subagent: activity };
+    }),
+  };
+}
+
+function applySubagent(
+  activity: SubagentActivity | undefined,
+  update: SubagentUpdate,
+): SubagentActivity {
+  if (update.type === "started") {
+    if (!activity) {
+      return {
+        name: update.name,
+        task: update.task,
+        depth: update.depth,
+        running: 1,
+        ok: null,
+        nested: [],
+        calls: [],
+        notices: [],
+        usage: null,
+      };
+    }
+    const nested =
+      update.depth > activity.depth ? [...activity.nested, update.name] : activity.nested;
+    return { ...activity, running: activity.running + 1, nested };
+  }
+  // An update for a run whose start was missed starts the record anyway.
+  const base: SubagentActivity = activity ?? {
+    name: update.type === "finished" ? update.name : "sub-agent",
+    task: "",
+    depth: update.type === "finished" ? update.depth : 1,
+    running: 1,
+    ok: null,
+    nested: [],
+    calls: [],
+    notices: [],
+    usage: null,
+  };
+  switch (update.type) {
+    case "toolCall":
+      return {
+        ...base,
+        calls: [
+          ...base.calls,
+          { id: update.id, name: update.name, arguments: update.arguments, status: "running" },
+        ],
+      };
+    case "toolResult":
+      return {
+        ...base,
+        calls: base.calls.map((c) =>
+          c.id === update.id
+            ? {
+                ...c,
+                status: update.ok ? "completed" : "failed",
+                output: update.output,
+                truncated: update.truncated,
+                error: update.error,
+              }
+            : c,
+        ),
+      };
+    case "notice":
+      return { ...base, notices: [...base.notices, update.text.trim()] };
+    case "finished": {
+      const running = Math.max(0, base.running - 1);
+      return update.depth <= base.depth
+        ? { ...base, running, ok: update.ok, usage: update.usage }
+        : { ...base, running };
+    }
+  }
 }
 
 /** The newest running call of `tool` now waits on approval `qid`. */

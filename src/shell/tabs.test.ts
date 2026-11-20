@@ -13,6 +13,8 @@ function opened(threadId: string, history: OpenedThread["history"] = []): Opened
     sessionId: `s-${threadId}`,
     history,
     memoryNote: null,
+    project: null,
+    notes: [],
   };
 }
 

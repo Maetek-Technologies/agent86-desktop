@@ -9,6 +9,7 @@ use crate::settings::{
     expand_home, home_dir, split_ref, Approval, Egress, Ingress, KeyUse, McpTransport,
     ProviderKind, ProviderSettings, Settings,
 };
+use crate::trust::ProjectContent;
 use crate::unstable::{self, PriceTable};
 use agent86_core::sdk::providers::{
     collect_completion, AnthropicConfig, AnthropicProvider, CompletionRequest, GoogleConfig,
@@ -219,17 +220,20 @@ fn provider(
 /// unset `${VAR}` fails the open with a clear message.
 pub struct ThreadPlan {
     pub builder: AgentBuilder,
+    /// What to tell the user about how it was built (a project server the settings shadow).
+    pub notes: Vec<String>,
     /// The model the thread starts on (`provider:model`), or the frontier model under triage.
     pub model: String,
     pub context_window: u64,
 }
 
 /// An agent builder for a thread in `workspace` with `settings`: provider (or triage), limits,
-/// guardrails, MCP servers, skills, and sub-agents. The caller adds memory, a session to resume,
-/// and the thread's question callbacks.
+/// guardrails, MCP servers, skills, and sub-agents, plus what `project` brings when the user
+/// trusts it. The caller adds memory, a session to resume, and the thread's question callbacks.
 pub fn thread_plan(
     settings: &Settings,
     workspace: PathBuf,
+    project: Option<&ProjectContent>,
     keys: &dyn KeySource,
 ) -> Result<ThreadPlan, String> {
     let prices = unstable::price_table(&settings.pricing, &settings.providers);
@@ -282,17 +286,40 @@ pub fn thread_plan(
         window = context_window(settings, &model);
     }
 
+    let mut notes = Vec::new();
     for (name, server) in settings.mcp_servers.iter().filter(|(_, s)| s.enabled) {
         builder = builder.mcp_server(name, mcp_server(name, server, keys)?);
+    }
+    if let Some(project) = project {
+        for (name, server) in project.mcp_servers.iter().filter(|(_, s)| s.enabled) {
+            if settings.mcp_servers.contains_key(name) {
+                notes.push(format!(
+                    "The project's MCP server {name} was not started: your settings have one of                      that name."
+                ));
+                continue;
+            }
+            builder = builder.mcp_server(name, mcp_server(name, server, keys)?);
+        }
+    }
+    // A project's skills come first: an earlier folder wins a name both hold, as in agent86.
+    if settings.skills.enabled {
+        for dir in project.map(ProjectContent::skill_dirs).unwrap_or_default() {
+            builder = builder.skills_dir(dir);
+        }
     }
     for dir in skill_dirs(settings) {
         builder = builder.skills_dir(dir);
     }
-    if let Some(subagents) = subagents(settings) {
+    if let Some(mut subagents) = subagents(settings) {
+        // A later folder replaces a specialist of the same name: the project's win, as in agent86.
+        if let Some(dir) = project.and_then(ProjectContent::agents_dir) {
+            subagents = subagents.specialists_dir(dir);
+        }
         builder = builder.subagents(subagents);
     }
     Ok(ThreadPlan {
         builder,
+        notes,
         model,
         context_window: window,
     })
@@ -510,7 +537,7 @@ mod tests {
             frontier: "vllm:big".into(),
         });
         let dir = tempfile::tempdir().unwrap();
-        let plan = thread_plan(&settings, dir.path().into(), &FakeKeys::default()).unwrap();
+        let plan = thread_plan(&settings, dir.path().into(), None, &FakeKeys::default()).unwrap();
         assert_eq!(plan.model, "vllm:big");
         // The builder accepts what the plan named: both triage models are registered.
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -534,7 +561,7 @@ mod tests {
             },
         );
         let dir = tempfile::tempdir().unwrap();
-        let err = thread_plan(&settings, dir.path().into(), &FakeKeys::default())
+        let err = thread_plan(&settings, dir.path().into(), None, &FakeKeys::default())
             .err()
             .unwrap();
         assert!(
@@ -542,7 +569,7 @@ mod tests {
             "{err}"
         );
         settings.mcp_servers.get_mut("remote").unwrap().enabled = false;
-        assert!(thread_plan(&settings, dir.path().into(), &FakeKeys::default()).is_ok());
+        assert!(thread_plan(&settings, dir.path().into(), None, &FakeKeys::default()).is_ok());
     }
 
     #[test]

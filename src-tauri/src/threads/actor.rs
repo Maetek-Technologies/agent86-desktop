@@ -10,12 +10,17 @@
 //! exists because agent86-core clears the token when a turn starts ("a cancel requested while no
 //! turn was running must not kill this one"), which would swallow a cancel sent between
 //! [`ThreadHandle::prompt`] and that point; a watcher running beside the turn re-applies it.
+//!
+//! A thread can be rebuilt between turns ([`ThreadHandle::reload`]: new settings, a project just
+//! trusted): a new agent takes over the conversation and the secrets the old one held.
 
 use super::events::{DesktopEvent, StopReason, TurnInfo, UsageInfo};
 use super::history::{self, HistoryItem};
 use super::questions::{Answer, Questions};
-use agent86_core::sdk::{AgentBuilder, CancelToken, Turn};
+use crate::unstable::{self, ThreadSecrets};
+use agent86_core::sdk::{Agent, AgentBuilder, CancelToken, Turn};
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -32,6 +37,7 @@ const CANCEL_WATCH_INTERVAL: Duration = Duration::from_millis(20);
 
 enum Command {
     Prompt(Turn),
+    Reload(MakeBuilder, mpsc::Sender<Result<Built, String>>),
 }
 
 /// What a thread's agent offers, as built: for the `/` menu and the `/tools`, `/skills`, and
@@ -48,12 +54,28 @@ pub struct Capabilities {
     pub tools: Vec<String>,
 }
 
-/// What the actor reports once its agent is built.
-struct Started {
+/// How a thread is set up beyond its builder.
+#[derive(Debug, Clone, Default)]
+pub struct ThreadOptions {
+    /// Remember secrets for this workspace in the OS keyring and load what was remembered, as
+    /// the CLI does. `None` keeps secrets for the thread only (tests never touch the keyring).
+    pub keyring_workspace: Option<PathBuf>,
+}
+
+/// An agent as built: what the handle keeps of it.
+struct Built {
     cancel: CancelToken,
     capabilities: Capabilities,
+    secrets: ThreadSecrets,
+}
+
+/// What the actor reports once its first agent is built.
+struct Started {
+    built: Built,
     session_id: String,
     history: Vec<HistoryItem>,
+    /// Secrets remembered for the project and loaded into the thread.
+    loaded_secrets: Vec<String>,
 }
 
 /// State the handle and the actor share.
@@ -66,19 +88,67 @@ struct Shared {
 /// The UI side of a thread. Dropping it cancels any running turn and lets the actor exit.
 pub struct ThreadHandle {
     commands: mpsc::Sender<Command>,
-    cancel: CancelToken,
     shared: Arc<Shared>,
     questions: Arc<Questions>,
-    capabilities: Capabilities,
+    /// The current agent's cancel token, capabilities, and secrets (a reload replaces them).
+    built: Mutex<Built>,
     session_id: String,
     /// The reopened session's conversation; taken once by whoever opened the thread.
     history: Mutex<Vec<HistoryItem>>,
+    loaded_secrets: Vec<String>,
+}
+
+/// Build an agent from `make`, with the thread's question callbacks, its vault attached to the
+/// keyring if asked, and its sub-agents reported to `sink`. Call inside the actor's runtime
+/// (building may start MCP servers).
+fn build(
+    make: MakeBuilder,
+    questions: &Arc<Questions>,
+    sink: &EventSink,
+    options: &ThreadOptions,
+) -> Result<(Agent, Built, Vec<String>), String> {
+    let (approve, limit, secret) = (questions.clone(), questions.clone(), questions.clone());
+    let agent = make()?
+        // Every question goes to the UI and waits for its answer (M2).
+        .approver(move |tool, preview| approve.approve(tool, preview))
+        .on_limit(move |hit| limit.raise_limit(hit))
+        .on_secret_request(move |request| secret.secret(request))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let secrets = ThreadSecrets::of(&agent);
+    let loaded = match &options.keyring_workspace {
+        Some(workspace) => secrets.attach_keyring(workspace),
+        None => Vec::new(),
+    };
+    let events = sink.clone();
+    unstable::observe_subagents(&agent, secrets.clone(), move |card, announced, update| {
+        events(DesktopEvent::Subagent {
+            card,
+            announced,
+            update,
+        })
+    });
+    questions.set_secrets(secrets.clone());
+    let built = Built {
+        cancel: agent.cancel_handle(),
+        capabilities: Capabilities {
+            skills: agent.skills(),
+            specialists: agent.specialists(),
+            tools: agent.tool_names(),
+        },
+        secrets,
+    };
+    Ok((agent, built, loaded))
 }
 
 impl ThreadHandle {
     /// Start the actor and build its agent. Returns once the agent is built, or with the build
     /// error (a bad workspace, an MCP server that would not start).
-    pub fn spawn(make: MakeBuilder, sink: EventSink) -> Result<Self, String> {
+    pub fn spawn(
+        make: MakeBuilder,
+        sink: EventSink,
+        options: ThreadOptions,
+    ) -> Result<Self, String> {
         let (commands, inbox) = mpsc::channel::<Command>();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<Started, String>>();
         let shared = Arc::new(Shared {
@@ -87,11 +157,12 @@ impl ThreadHandle {
         });
         let actor_shared = shared.clone();
         let questions = Questions::new(sink.clone(), shared.cancel_requested.clone());
-        let (approve, limit, secret) = (questions.clone(), questions.clone(), questions.clone());
+        let actor_questions = questions.clone();
 
         std::thread::Builder::new()
             .name("agent86-thread".into())
             .spawn(move || {
+                let questions = actor_questions;
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -102,37 +173,24 @@ impl ThreadHandle {
                         return;
                     }
                 };
-                // Building may start MCP servers, which need the runtime.
                 let built = {
                     let _entered = runtime.enter();
-                    make().and_then(|builder| {
-                        builder
-                            // Every question goes to the UI and waits for its answer (M2).
-                            .approver(move |tool, preview| approve.approve(tool, preview))
-                            .on_limit(move |hit| limit.raise_limit(hit))
-                            .on_secret_request(move |request| secret.secret(request))
-                            .build()
-                            .map_err(|error| error.to_string())
-                    })
+                    build(make, &questions, &sink, &options)
                 };
-                let mut agent = match built {
-                    Ok(agent) => agent,
+                let (mut agent, built, loaded_secrets) = match built {
+                    Ok(built) => built,
                     Err(error) => {
                         let _ = ready_tx.send(Err(error));
                         return;
                     }
                 };
-                let cancel = agent.cancel_handle();
-                let capabilities = Capabilities {
-                    skills: agent.skills(),
-                    specialists: agent.specialists(),
-                    tools: agent.tool_names(),
-                };
+                let mut cancel = built.cancel.clone();
+                let mut secrets = built.secrets.clone();
                 let started = Started {
-                    cancel: cancel.clone(),
-                    capabilities,
+                    built,
                     session_id: agent.session_id().to_owned(),
                     history: history::from_conversation(agent.conversation()),
+                    loaded_secrets,
                 };
                 if ready_tx.send(Ok(started)).is_err() {
                     return;
@@ -140,6 +198,25 @@ impl ThreadHandle {
 
                 while let Ok(command) = inbox.recv() {
                     match command {
+                        Command::Reload(make, reply) => {
+                            let rebuilt = {
+                                let _entered = runtime.enter();
+                                build(make, &questions, &sink, &options)
+                            };
+                            let answer = rebuilt.map(|(new, built, _)| {
+                                built.secrets.carry_over(&secrets);
+                                agent = new.with_conversation(agent.conversation().clone());
+                                cancel = built.cancel.clone();
+                                secrets = built.secrets.clone();
+                                built
+                            });
+                            if answer.is_err() {
+                                // The old agent stays; its vault answers questions again.
+                                questions.set_secrets(secrets.clone());
+                            }
+                            actor_shared.busy.store(false, Ordering::SeqCst);
+                            let _ = reply.send(answer);
+                        }
                         Command::Prompt(turn) => {
                             let events = sink.clone();
                             let result = runtime.block_on(async {
@@ -201,17 +278,27 @@ impl ThreadHandle {
             .map_err(|_| "the thread stopped while starting".to_owned())??;
         Ok(Self {
             commands,
-            cancel: started.cancel,
             shared,
             questions,
-            capabilities: started.capabilities,
+            built: Mutex::new(started.built),
             session_id: started.session_id,
             history: Mutex::new(started.history),
+            loaded_secrets: started.loaded_secrets,
         })
     }
 
-    pub fn capabilities(&self) -> &Capabilities {
-        &self.capabilities
+    pub fn capabilities(&self) -> Capabilities {
+        self.lock_built().capabilities.clone()
+    }
+
+    /// The thread's secrets (the current agent's vault).
+    pub fn secrets(&self) -> ThreadSecrets {
+        self.lock_built().secrets.clone()
+    }
+
+    /// Secrets remembered for the project that the thread loaded when it started.
+    pub fn loaded_secrets(&self) -> &[String] {
+        &self.loaded_secrets
     }
 
     /// The agent86 session this thread continues (or started).
@@ -244,11 +331,30 @@ impl ThreadHandle {
             return Err("A turn is already running in this thread.".into());
         }
         self.shared.cancel_requested.store(false, Ordering::SeqCst);
-        self.cancel.clear();
+        self.lock_built().cancel.clear();
         self.commands.send(Command::Prompt(turn)).map_err(|_| {
             self.shared.busy.store(false, Ordering::SeqCst);
             "This thread has stopped.".to_owned()
         })
+    }
+
+    /// Rebuild the thread's agent from `make`, keeping its conversation and secrets. Refused
+    /// while a turn runs. Returns the new agent's capabilities; on failure the old agent stays.
+    pub fn reload(&self, make: MakeBuilder) -> Result<Capabilities, String> {
+        if self.shared.busy.swap(true, Ordering::SeqCst) {
+            return Err("Wait for the turn to end before reloading the thread.".into());
+        }
+        let (reply, answer) = mpsc::channel();
+        if self.commands.send(Command::Reload(make, reply)).is_err() {
+            self.shared.busy.store(false, Ordering::SeqCst);
+            return Err("This thread has stopped.".into());
+        }
+        let built = answer
+            .recv()
+            .map_err(|_| "The thread stopped while reloading.".to_owned())??;
+        let capabilities = built.capabilities.clone();
+        *self.lock_built() = built;
+        Ok(capabilities)
     }
 
     /// Answer question `qid` of the running turn.
@@ -261,13 +367,19 @@ impl ThreadHandle {
     pub fn cancel(&self) {
         if self.shared.busy.load(Ordering::SeqCst) {
             self.shared.cancel_requested.store(true, Ordering::SeqCst);
-            self.cancel.cancel();
+            self.lock_built().cancel.cancel();
         }
     }
 
     #[cfg(test)]
     pub fn is_busy(&self) -> bool {
         self.shared.busy.load(Ordering::SeqCst)
+    }
+
+    fn lock_built(&self) -> std::sync::MutexGuard<'_, Built> {
+        self.built
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 

@@ -1,6 +1,6 @@
 //! The app's threads, by id, with the workspace each one runs in.
 
-use super::actor::{Capabilities, EventSink, MakeBuilder, ThreadHandle};
+use super::actor::{Capabilities, EventSink, MakeBuilder, ThreadHandle, ThreadOptions};
 use super::history::HistoryItem;
 use super::questions::Answer;
 use crate::workspace_files;
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use ts_rs::TS;
 
 /// The most files one `@` search returns.
@@ -26,6 +26,8 @@ pub struct Opened {
     pub capabilities: Capabilities,
     pub session_id: String,
     pub history: Vec<HistoryItem>,
+    /// Secrets remembered for the project that the thread loaded.
+    pub loaded_secrets: Vec<String>,
 }
 
 /// One turn, as the UI asks for it.
@@ -51,7 +53,8 @@ pub enum TurnRequest {
 }
 
 struct Thread {
-    handle: ThreadHandle,
+    /// Shared, so a reload can wait on the actor without holding the map's lock.
+    handle: Arc<ThreadHandle>,
     workspace: PathBuf,
     mention_max_bytes: u64,
 }
@@ -73,6 +76,7 @@ impl ThreadManager {
         workspace: PathBuf,
         mention_max_bytes: u64,
         resume: Option<&str>,
+        options: ThreadOptions,
     ) -> Result<Opened, String> {
         {
             let threads = self.lock();
@@ -87,15 +91,16 @@ impl ThreadManager {
                 }
             }
         }
-        let handle = ThreadHandle::spawn(make, sink)?;
-        let capabilities = handle.capabilities().clone();
+        let handle = ThreadHandle::spawn(make, sink, options)?;
+        let capabilities = handle.capabilities();
+        let loaded_secrets = handle.loaded_secrets().to_vec();
         let session_id = handle.session_id().to_owned();
         let history = handle.take_history();
         let id = format!("t{}", self.next_id.fetch_add(1, Ordering::SeqCst) + 1);
         self.lock().insert(
             id.clone(),
             Thread {
-                handle,
+                handle: Arc::new(handle),
                 workspace,
                 mention_max_bytes,
             },
@@ -105,6 +110,7 @@ impl ThreadManager {
             capabilities,
             session_id,
             history,
+            loaded_secrets,
         })
     }
 
@@ -151,6 +157,23 @@ impl ThreadManager {
         let workspace = self.with(id, |thread| Ok(thread.workspace.clone()))?;
         // Walked outside the lock, so a big workspace does not hold up other threads.
         Ok(workspace_files::find(&workspace, query, FIND_LIMIT))
+    }
+
+    /// The workspace thread `id` runs in.
+    pub fn workspace(&self, id: &str) -> Result<PathBuf, String> {
+        self.with(id, |thread| Ok(thread.workspace.clone()))
+    }
+
+    /// Rebuild thread `id`'s agent from `make`, keeping its conversation and secrets. Only
+    /// between turns. The agent is built outside the map's lock.
+    pub fn reload(&self, id: &str, make: MakeBuilder) -> Result<Capabilities, String> {
+        let handle = self.with(id, |thread| Ok(thread.handle.clone()))?;
+        handle.reload(make)
+    }
+
+    /// Thread `id`'s secrets: names, held or remembered for the project.
+    pub fn secrets(&self, id: &str) -> Result<crate::unstable::ThreadSecrets, String> {
+        self.with(id, |thread| Ok(thread.handle.secrets()))
     }
 
     /// Close a thread: cancels its turn, if any, and lets its actor exit.

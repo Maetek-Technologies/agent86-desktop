@@ -2,6 +2,7 @@
 import type { ApprovalInfo } from "./ApprovalInfo";
 import type { LimitInfo } from "./LimitInfo";
 import type { StopReason } from "./StopReason";
+import type { SubagentUpdate } from "./SubagentUpdate";
 import type { TurnInfo } from "./TurnInfo";
 import type { UsageInfo } from "./UsageInfo";
 
@@ -13,4 +14,8 @@ title: string, } | { "type": "toolResult", id: string, name: string, ok: boolean
 /**
  * agent86's `[tool] name -> summary` line, without the prefix.
  */
-summary: string, } | { "type": "usage", step: UsageInfo, session: UsageInfo, } | { "type": "compacted", notice: string, summary: string | null, } | { "type": "approvalRequest", qid: number, tool: string, preview: ApprovalInfo, } | { "type": "limitRequest", qid: number, limit: LimitInfo, } | { "type": "secretRequest", qid: number, name: string, reason: string, replacing: boolean, } | { "type": "questionClosed", qid: number, answered: boolean, } | { "type": "turnEnded", stopReason: StopReason, answer: string, turn: TurnInfo | null, usage: UsageInfo, } | { "type": "turnFailed", error: string, };
+summary: string, } | { "type": "usage", step: UsageInfo, session: UsageInfo, } | { "type": "compacted", notice: string, summary: string | null, } | { "type": "approvalRequest", qid: number, tool: string, preview: ApprovalInfo, } | { "type": "limitRequest", qid: number, limit: LimitInfo, } | { "type": "secretRequest", qid: number, name: string, reason: string, replacing: boolean, 
+/**
+ * Whether the answer may also keep it for the project (an OS keyring is attached).
+ */
+canRemember: boolean, } | { "type": "questionClosed", qid: number, answered: boolean, } | { "type": "subagent", card: string, announced: boolean, update: SubagentUpdate, } | { "type": "turnEnded", stopReason: StopReason, answer: string, turn: TurnInfo | null, usage: UsageInfo, } | { "type": "turnFailed", error: string, };

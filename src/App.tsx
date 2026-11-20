@@ -11,6 +11,7 @@ import {
   openThread,
   pickWorkspace,
   prompt,
+  reloadThread,
   renameSession,
   type AppInfo,
   type ModelInfo,
@@ -24,6 +25,7 @@ import type { LocalAction } from "./desktop-client/session-state.ts";
 import { Sidebar } from "./shell/Sidebar.tsx";
 import { Tabs } from "./shell/Tabs.tsx";
 import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
+import { MemoryPanel } from "./memory/MemoryPanel.tsx";
 import { FirstRun } from "./settings/FirstRun.tsx";
 import { SettingsView } from "./settings/SettingsView.tsx";
 import { ThreadView } from "./thread/ThreadView.tsx";
@@ -41,6 +43,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionList | null>(null);
   const [settingsState, setSettingsState] = useState<SettingsState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const [opening, setOpening] = useState(false);
   const [state, dispatch] = useReducer(tabsReduce, NO_TABS);
   const stateRef = useRef(state);
@@ -204,6 +207,8 @@ export function App() {
         onRefresh={refreshSessions}
         onSettings={() => (showSettings ? setShowSettings(false) : openSettings())}
         settingsOpen={showSettings}
+        onMemory={() => setShowMemory((open) => !open)}
+        memoryOpen={showMemory}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {state.tabs.length > 0 && (
@@ -231,7 +236,7 @@ export function App() {
           {state.tabs.map((tab) => (
             <div key={tab.key} className="absolute inset-0" hidden={tab.key !== state.active}>
               {tab.opened ? (
-                <TabView tab={tab} dispatchTab={dispatch} />
+                <TabView tab={tab} dispatchTab={dispatch} onMemory={() => setShowMemory(true)} />
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-muted">
                   Opening {folderName(tab.workspace)}…
@@ -247,6 +252,11 @@ export function App() {
               onNew={() => void newThread()}
               onSettings={openSettings}
             />
+          )}
+          {showMemory && (
+            <div className="absolute inset-y-0 right-0 z-20 w-96 border-l border-border shadow-xl">
+              <MemoryPanel onClose={() => setShowMemory(false)} />
+            </div>
           )}
           {showSettings && ready && (
             <div className="absolute inset-0 z-10">
@@ -264,9 +274,19 @@ export function App() {
 }
 
 /** One open thread, with its commands bound to it. */
-function TabView({ tab, dispatchTab }: { tab: Tab; dispatchTab: (action: TabsAction) => void }) {
+function TabView({
+  tab,
+  dispatchTab,
+  onMemory,
+}: {
+  tab: Tab;
+  dispatchTab: (action: TabsAction) => void;
+  onMemory: () => void;
+}) {
   const opened = tab.opened!;
   const key = tab.key;
+  const [secretsOpen, setSecretsOpen] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const local = useCallback(
     (action: DesktopEvent | LocalAction) => dispatchTab({ type: "thread", key, action }),
     [dispatchTab, key],
@@ -281,6 +301,10 @@ function TabView({ tab, dispatchTab }: { tab: Tab; dispatchTab: (action: TabsAct
           local({ type: "local/list", title: `/${command.list} (${items.length})`, items });
           return;
         }
+        case "panel":
+          if (command.panel === "secrets") setSecretsOpen(true);
+          else onMemory();
+          return;
         case "error":
           local({ type: "local/warning", text: command.message });
           return;
@@ -291,8 +315,30 @@ function TabView({ tab, dispatchTab }: { tab: Tab; dispatchTab: (action: TabsAct
           );
       }
     },
-    [opened, local],
+    [opened, local, onMemory],
   );
+
+  const reload = useCallback(() => {
+    setReloading(true);
+    reloadThread(opened.threadId).then(
+      (reloaded) => {
+        dispatchTab({ type: "reloaded", key, reloaded });
+        const trusted =
+          reloaded.project?.state === "trusted"
+            ? " with this project's skills, specialists, and MCP servers"
+            : "";
+        local({
+          type: "local/notice",
+          text: `[reloaded] ${reloaded.model}${trusted}; the conversation carries on.`,
+        });
+        setReloading(false);
+      },
+      (e: unknown) => {
+        local({ type: "local/warning", text: String(e) });
+        setReloading(false);
+      },
+    );
+  }, [opened, key, local, dispatchTab]);
 
   const stop = useCallback(() => {
     local({ type: "local/cancelling" });
@@ -320,6 +366,10 @@ function TabView({ tab, dispatchTab }: { tab: Tab; dispatchTab: (action: TabsAct
       onStop={stop}
       onAnswer={reply}
       findFiles={searchFiles}
+      secretsOpen={secretsOpen}
+      onSecrets={setSecretsOpen}
+      onReload={reload}
+      reloading={reloading}
     />
   );
 }

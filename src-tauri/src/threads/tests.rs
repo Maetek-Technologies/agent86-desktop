@@ -1,7 +1,7 @@
 //! Thread actor tests against a scripted provider: no network, no model, no keyring.
 
-use super::actor::ThreadHandle;
-use super::events::{DesktopEvent, StopReason};
+use super::actor::{ThreadHandle, ThreadOptions};
+use super::events::{DesktopEvent, StopReason, SubagentUpdate};
 use super::questions::{Answer, ApprovalChoice};
 use agent86_core::sdk::providers::{
     Completion, CompletionDelta, CompletionRequest, DeltaStream, Provider, ProviderError,
@@ -122,6 +122,7 @@ fn start_with(
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
+        ThreadOptions::default(),
     )?;
     Ok(Harness { thread, events })
 }
@@ -355,6 +356,7 @@ fn real_model_smoke() {
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
+        ThreadOptions::default(),
     )
     .unwrap();
     let h = Harness { thread, events };
@@ -555,6 +557,7 @@ fn a_secret_reaches_the_agent_but_never_comes_back_to_the_ui() {
             qid,
             Answer::Secret {
                 value: Some(VALUE.into()),
+                remember: false,
             },
         )
         .unwrap();
@@ -594,6 +597,7 @@ fn capabilities_list_skills_and_tools_and_a_skill_runs_directly() {
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
+        ThreadOptions::default(),
     )
     .unwrap();
     let caps = thread.capabilities().clone();
@@ -642,6 +646,7 @@ fn memory_thread(
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
+        ThreadOptions::default(),
     )
     .unwrap();
     Harness { thread, events }
@@ -732,6 +737,7 @@ fn the_manager_refuses_a_session_open_twice_and_too_many_threads() {
             dir.path().to_owned(),
             0,
             resume.as_deref(),
+            ThreadOptions::default(),
         )
     };
     let first = open(None).unwrap();
@@ -743,4 +749,129 @@ fn the_manager_refuses_a_session_open_twice_and_too_many_threads() {
     assert!(open(None).unwrap_err().contains("Close one first"));
     threads.close(&first.id).unwrap();
     assert!(open(None).is_ok());
+}
+
+/// A provider that also counts the messages each request carried, to see a conversation survive.
+struct Counting {
+    inner: Arc<Scripted>,
+    seen: Arc<Mutex<Vec<usize>>>,
+}
+
+impl Provider for Counting {
+    fn name(&self) -> &str {
+        "counting"
+    }
+
+    fn model(&self) -> &str {
+        "counting-model"
+    }
+
+    fn stream(&self, request: CompletionRequest) -> DeltaStream<'_> {
+        self.seen.lock().unwrap().push(request.messages.len());
+        self.inner.stream(request)
+    }
+
+    fn fresh(&self) -> Result<Arc<dyn Provider>, ProviderError> {
+        self.inner.fresh()
+    }
+}
+
+#[test]
+fn a_reload_keeps_the_conversation_and_the_secrets_and_takes_new_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start(vec![Reply::Text("first")], dir.path(), Builtins::ReadOnly).unwrap();
+    h.thread.prompt("hello").unwrap();
+    h.until_end();
+    h.thread
+        .secrets()
+        .set("API_TOKEN", "tok-123456".into(), false)
+        .unwrap();
+    assert!(!h
+        .thread
+        .capabilities()
+        .tools
+        .contains(&"write_file".to_owned()));
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let provider: Arc<dyn Provider> = Arc::new(Counting {
+        inner: Scripted::new(vec![Reply::Text("second")]),
+        seen: seen.clone(),
+    });
+    let workspace = dir.path().to_owned();
+    let capabilities = h
+        .thread
+        .reload(Box::new(move || {
+            Ok(Agent::builder()
+                .provider(provider)
+                .workspace(workspace)
+                .builtins(Builtins::Files)
+                .approval(ApprovalMode::Ask))
+        }))
+        .unwrap();
+    assert!(capabilities.tools.contains(&"write_file".to_owned()));
+    assert_eq!(h.thread.secrets().list().secrets[0].name, "API_TOKEN");
+
+    h.thread.prompt("again").unwrap();
+    assert_eq!(agent_text(&h.until_end()), "second");
+    // System, the first exchange, and the new prompt: the old conversation came along.
+    assert!(seen.lock().unwrap()[0] >= 4, "{:?}", seen.lock().unwrap());
+}
+
+#[test]
+fn a_reload_is_refused_during_a_turn_and_a_failed_one_keeps_the_old_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start(vec![Reply::Hang], dir.path(), Builtins::ReadOnly).unwrap();
+    h.thread.prompt("wait").unwrap();
+    let workspace = dir.path().to_owned();
+    let refused = h
+        .thread
+        .reload(Box::new(move || Ok(Agent::builder().workspace(workspace))));
+    assert!(refused.unwrap_err().contains("Wait for the turn"));
+    h.thread.cancel();
+    h.until_end();
+    let failed = h
+        .thread
+        .reload(Box::new(|| Err("no such model".to_owned())));
+    assert_eq!(failed.unwrap_err(), "no such model");
+    assert!(!h.thread.is_busy());
+}
+
+#[test]
+fn a_delegated_sub_agent_reports_on_its_calls_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start_with(
+        vec![
+            Reply::Tool("delegate", json!({"task": "look around"})),
+            Reply::Text("sub-agent answer"),
+            Reply::Text("main answer"),
+        ],
+        dir.path(),
+        Builtins::ReadOnly,
+        |builder| builder.subagents(agent86_core::sdk::SubAgents::new()),
+    )
+    .unwrap();
+    h.thread.prompt("delegate it").unwrap();
+    let events = h.until_end();
+    let updates: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            DesktopEvent::Subagent {
+                card,
+                announced,
+                update,
+            } => Some((card.clone(), *announced, update.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(&updates.first(), Some((card, true, SubagentUpdate::Started { task, .. })) if card == "call-1" && task.contains("look around")),
+        "{updates:?}"
+    );
+    assert!(
+        matches!(
+            &updates.last(),
+            Some((_, _, SubagentUpdate::Finished { ok: true, .. }))
+        ),
+        "{updates:?}"
+    );
 }

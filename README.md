@@ -5,12 +5,15 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M5.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
+> **Status: M6.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
 > with diffs, approvals, limit raises, secret prompts, `/` commands, `@` file mentions, and a
 > context meter. Sessions are saved to the memory database the agent86 CLI uses
 > (`~/.agent86/memory.db`), listed in the sidebar, and can be reopened and renamed. The app has
 > its own settings (providers and models, triage, limits, guardrails, MCP servers), set up on
-> first run by importing your agent86 CLI config or choosing a provider. The plan and
+> first run by importing your agent86 CLI config or choosing a provider. A memory panel shows
+> and pins what the agent remembers, a secrets panel manages each thread's secrets, a project's
+> own skills, specialists, and MCP servers load once you trust them, and sub-agents' work
+> (including isolated runs in git worktrees) shows on their delegation's card. The plan and
 > milestones are in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Settings and keys
@@ -25,6 +28,12 @@ Rust back end that embeds the agent in-process through
   never go into `settings.json`, and the UI never reads them back.
 - **MCP servers** can name a token as `${NAME}`: it is read from the environment variable
   `NAME`, or else the keyring entry `NAME`.
+- **Secrets** a thread holds reach tools as environment variables; the model sees only
+  `${secret:NAME}`. One remembered for a project is kept in the OS keyring under the CLI's
+  per-project entry, so threads opened there later, in the app or the CLI, load it.
+- **Project trust:** a workspace's `.agent86/skills`, `.claude/skills`, `.agent86/agents`, and
+  the MCP servers in its `.agent86/config.toml` load only after you review and trust them, and
+  again after any change. Trusted projects are listed in Settings, Projects.
 - To try the app without touching your real settings (a first run, say), start it with
   `AGENT86_DESKTOP_CONFIG_DIR` set to another folder. Sessions still go to the memory database
   in your home folder unless `USERPROFILE` (Windows) or `HOME` points elsewhere too.

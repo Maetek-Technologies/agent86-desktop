@@ -92,6 +92,10 @@ describe("summaries and names", () => {
   it("summarizes arguments by tool", () => {
     expect(argumentSummary("run_command", { command: "ls -la\nsecond" })).toBe("ls -la");
     expect(argumentSummary("python_exec", { code: "print(1)" })).toBe("print(1)");
+    expect(argumentSummary("delegate", { agent: "fixer", task: "add a docstring\nmore" })).toBe(
+      "fixer: add a docstring",
+    );
+    expect(argumentSummary("agent", { task: "look" })).toBe("look");
     expect(argumentSummary("edit_file", { path: "README.md", old_string: "a" })).toBe("README.md");
     expect(argumentSummary("web_fetch", { url: "https://x.test" })).toBe("https://x.test");
     expect(argumentSummary("other", { a: 1 })).toBe('{"a":1}');

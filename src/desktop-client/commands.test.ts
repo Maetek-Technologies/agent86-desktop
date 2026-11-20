@@ -53,11 +53,13 @@ describe("parseCommand", () => {
 });
 
 describe("commandsFor", () => {
-  it("offers the lists, /agent, and each skill", () => {
+  it("offers the lists, the panels, /agent, and each skill", () => {
     expect(commandsFor(caps).map((c) => c.name)).toEqual([
       "tools",
       "skills",
       "agents",
+      "secrets",
+      "memory",
       "agent",
       "code-reviewer",
       "outline-wiki",
@@ -65,6 +67,11 @@ describe("commandsFor", () => {
     expect(
       commandsFor({ skills: [], specialists: [], tools: [] }).map((c) => c.name),
     ).not.toContain("agent");
+  });
+
+  it("opens the secrets and memory panels", () => {
+    expect(parseCommand("/secrets", caps)).toEqual({ type: "panel", panel: "secrets" });
+    expect(parseCommand("/memory", caps)).toEqual({ type: "panel", panel: "memory" });
   });
 
   it("lists what a thread offers", () => {

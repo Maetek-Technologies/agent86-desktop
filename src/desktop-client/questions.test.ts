@@ -69,7 +69,14 @@ describe("questions", () => {
           runOnly: false,
         },
       },
-      { type: "secretRequest", qid: 3, name: "TOKEN", reason: "api", replacing: false },
+      {
+        type: "secretRequest",
+        qid: 3,
+        name: "TOKEN",
+        reason: "api",
+        replacing: false,
+        canRemember: true,
+      },
       { type: "questionClosed", qid: 2, answered: true },
     );
     expect(state.questions.map((q) => [q.kind, q.qid])).toEqual([["secret", 3]]);

@@ -9,24 +9,28 @@ const MIN_CHARS = 6;
  * (forked from agent86-web). The input is uncontrolled, so the value never enters React state; it
  * is read once when sent, cleared at once, and goes to Rust in that one call. Nothing sends it
  * back: the model and the transcript only ever see `${secret:NAME}`. Enter sends; Decline, Esc,
- * and the close button decline. agent86-core's embedding API keeps no keyring, so the value is
- * held for this thread only.
+ * and the close button decline. With a keyring, the value can also be remembered for the project,
+ * where every later thread in it (and the agent86 CLI) loads it.
  */
 export function SecretPrompt({
   name,
   reason,
   replacing,
+  canRemember,
   onEnter,
   onDecline,
 }: {
   name: string;
   reason: string;
   replacing: boolean;
-  onEnter: (value: string) => void;
+  /** An OS keyring is there to remember the value in. */
+  canRemember: boolean;
+  onEnter: (value: string, remember: boolean) => void;
   onDecline: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [remember, setRemember] = useState(false);
 
   useEffect(() => {
     input.current?.focus();
@@ -47,7 +51,7 @@ export function SecretPrompt({
       input.current?.focus();
       return;
     }
-    onEnter(takeValue(input.current));
+    onEnter(takeValue(input.current), canRemember && remember);
   }
 
   function onKeyDown(event: KeyboardEvent) {
@@ -104,9 +108,23 @@ export function SecretPrompt({
             {problem}
           </p>
         )}
+        {canRemember && (
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>
+              Remember for this project (kept in the OS keyring; threads opened here load it)
+            </span>
+          </label>
+        )}
         <p className="text-xs text-muted">
           The model only ever sees the name. The value goes straight to Agent 86, is held for this
-          thread only, and is not kept in the transcript.
+          thread{canRemember && remember ? " and the project" : " only"}, and is not kept in the
+          transcript.
         </p>
         <div className="flex items-center justify-end gap-2">
           <button

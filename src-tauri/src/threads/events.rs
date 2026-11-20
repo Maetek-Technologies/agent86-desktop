@@ -74,12 +74,22 @@ pub enum DesktopEvent {
         name: String,
         reason: String,
         replacing: bool,
+        /// Whether the answer may also keep it for the project (an OS keyring is attached).
+        can_remember: bool,
     },
     /// Question `qid` is over: answered, or dropped because the turn was cancelled.
     QuestionClosed {
         #[ts(type = "number")]
         qid: u64,
         answered: bool,
+    },
+    /// What a sub-agent is doing, reported on the card of the `delegate` call that started it
+    /// (`card` is that call's id). `announced` is false for a `/agent` turn, whose card no call
+    /// has shown yet.
+    Subagent {
+        card: String,
+        announced: bool,
+        update: SubagentUpdate,
     },
     /// The turn is over and the thread takes a new prompt.
     TurnEnded {
@@ -91,6 +101,74 @@ pub enum DesktopEvent {
     /// The turn failed (the model could not be reached, a limit tripped). The thread takes a new
     /// prompt.
     TurnFailed { error: String },
+}
+
+/// One thing a sub-agent did. Nested runs report on their top-level card; their calls' ids are
+/// namespaced under it (`<card>/<n>`).
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SubagentUpdate {
+    Started {
+        #[ts(type = "number")]
+        run: u64,
+        /// The specialist or role it runs as.
+        name: String,
+        depth: u32,
+        task: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        /// Already redacted.
+        #[ts(type = "Record<string, unknown>")]
+        arguments: Value,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        ok: bool,
+        output: String,
+        truncated: bool,
+        error: Option<String>,
+    },
+    Notice {
+        text: String,
+    },
+    Finished {
+        #[ts(type = "number")]
+        run: u64,
+        name: String,
+        depth: u32,
+        ok: bool,
+        /// What it and anything it delegated used.
+        usage: UsageInfo,
+    },
+}
+
+impl SubagentUpdate {
+    /// A call's result, its output capped as the main loop's are.
+    pub fn tool_result(
+        id: &str,
+        name: &str,
+        ok: bool,
+        output: &str,
+        error: Option<String>,
+    ) -> Self {
+        let (output, truncated) = cap(output, MAX_TOOL_OUTPUT_BYTES);
+        Self::ToolResult {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            ok,
+            output,
+            truncated,
+            error,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]

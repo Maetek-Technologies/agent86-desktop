@@ -7,15 +7,16 @@ use crate::cli_import::{self, ImportPreview};
 use crate::keys::{self, KeyStatus, OsKeys};
 use crate::sessions::{SessionList, Sessions};
 use crate::settings::{self, ProviderPreset, ProviderSettings, Settings, SettingsStore};
-use crate::threads::actor::Capabilities;
+use crate::threads::actor::{Capabilities, ThreadOptions};
 use crate::threads::history::HistoryItem;
 use crate::threads::manager::TurnRequest;
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
+use crate::trust::{self, ProjectStatus, TrustState, TrustStore};
 use agent86_core::sdk::Memory;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::Channel;
@@ -237,6 +238,11 @@ pub struct OpenedThread {
     pub history: Vec<HistoryItem>,
     /// Something to know about saving: the embedder fell back, or memory is off.
     pub memory_note: Option<String>,
+    /// What the workspace brings (skills, specialists, MCP servers) and whether it is trusted;
+    /// `None` when it brings nothing.
+    pub project: Option<ProjectStatus>,
+    /// What else to know about how the thread was set up.
+    pub notes: Vec<String>,
 }
 
 /// Start a thread in `workspace`, continuing saved session `session_id` if given. Its events
@@ -267,9 +273,7 @@ fn open_thread_blocking(
     let sessions = app.state::<Sessions>();
     let workspace = resolve_workspace(workspace)?;
     let settings = app.state::<SettingsStore>().require()?;
-    let plan = agent_factory::thread_plan(&settings, workspace.clone(), &OsKeys)?;
-    let model = plan.model;
-    let context_window = plan.context_window;
+    let setup = prepare(app, &settings, &workspace)?;
     let (memory, memory_note) = match sessions.memory(&settings.memory) {
         Ok(opened) => (Some(opened.memory), opened.note),
         Err(_) if session_id.is_some() => {
@@ -281,7 +285,7 @@ fn open_thread_blocking(
         Err(problem) => (None, Some(format!("This thread is not saved: {problem}"))),
     };
     let resume = session_id.clone();
-    let mut builder = plan.builder;
+    let mut builder = setup.plan.builder;
 
     let opened = threads.open(
         Box::new(move || {
@@ -300,18 +304,107 @@ fn open_thread_blocking(
         workspace.clone(),
         settings.tools.mention_max_bytes,
         session_id.as_deref(),
+        ThreadOptions {
+            keyring_workspace: Some(workspace.clone()),
+        },
     )?;
     sessions.record_workspace(&opened.session_id, &workspace);
+    let mut notes = setup.plan.notes;
+    if !opened.loaded_secrets.is_empty() {
+        notes.push(format!(
+            "Secrets remembered for this project: {}.",
+            opened.loaded_secrets.join(", ")
+        ));
+    }
     Ok(OpenedThread {
         thread_id: opened.id,
         workspace: workspace.display().to_string(),
-        model,
-        context_window,
+        model: setup.plan.model,
+        context_window: setup.plan.context_window,
         capabilities: opened.capabilities,
         session_id: opened.session_id,
         history: opened.history,
         memory_note,
+        project: setup.project,
+        notes,
     })
+}
+
+/// A thread's plan from `settings`, with what its project brings when the user trusts it.
+struct Setup {
+    plan: agent_factory::ThreadPlan,
+    project: Option<ProjectStatus>,
+}
+
+fn prepare(app: &tauri::AppHandle, settings: &Settings, workspace: &Path) -> Result<Setup, String> {
+    let (content, project, mut notes) = match trust::scan(workspace) {
+        Ok(Some(content)) => {
+            let state = app.state::<TrustStore>().state(&content);
+            let status = content.status(state);
+            (
+                (state == TrustState::Trusted).then_some(content),
+                Some(status),
+                Vec::new(),
+            )
+        }
+        Ok(None) => (None, None, Vec::new()),
+        // Too big to review: nothing of the project loads, and the user hears why.
+        Err(problem) => (None, None, vec![problem]),
+    };
+    let mut plan =
+        agent_factory::thread_plan(settings, workspace.to_owned(), content.as_ref(), &OsKeys)?;
+    notes.append(&mut plan.notes);
+    plan.notes = notes;
+    Ok(Setup { plan, project })
+}
+
+/// A thread rebuilt with the current settings and project trust, keeping its conversation.
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ReloadedThread {
+    pub model: String,
+    #[ts(type = "number")]
+    pub context_window: u64,
+    pub capabilities: Capabilities,
+    pub project: Option<ProjectStatus>,
+    pub notes: Vec<String>,
+}
+
+/// Rebuild thread `thread_id` with the settings and project trust as they are now (a project
+/// just trusted, settings changed). Its conversation and secrets carry over. Only between turns.
+#[tauri::command]
+pub async fn reload_thread(
+    app: tauri::AppHandle,
+    thread_id: String,
+) -> Result<ReloadedThread, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let threads = app.state::<ThreadManager>();
+        let workspace = threads.workspace(&thread_id)?;
+        let settings = app.state::<SettingsStore>().require()?;
+        let setup = prepare(&app, &settings, &workspace)?;
+        // The conversation comes over from the old agent; memory keeps saving it.
+        let memory = app.state::<Sessions>().memory(&settings.memory).ok();
+        let mut builder = setup.plan.builder;
+        let capabilities = threads.reload(
+            &thread_id,
+            Box::new(move || {
+                if let Some(opened) = memory {
+                    builder = builder.memory(opened.memory);
+                }
+                Ok(builder)
+            }),
+        )?;
+        Ok(ReloadedThread {
+            model: setup.plan.model,
+            context_window: setup.plan.context_window,
+            capabilities,
+            project: setup.project,
+            notes: setup.plan.notes,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Recent saved sessions, newest first, from the memory database shared with the agent86 CLI.

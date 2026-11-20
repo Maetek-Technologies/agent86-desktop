@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { commandsFor } from "../desktop-client/commands.ts";
 import type { Answer, OpenedThread } from "../desktop-client/events.ts";
 import type { Entry, Question, SessionState } from "../desktop-client/session-state.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
+import { SecretsPanel } from "../secrets/SecretsPanel.tsx";
+import { TrustBanner, TrustDialog } from "../trust/TrustDialog.tsx";
 import { PermissionPanel } from "../tools/PermissionPanel.tsx";
 import { LimitPanel } from "./LimitPanel.tsx";
 import { PromptInput } from "./PromptInput.tsx";
@@ -18,9 +20,28 @@ interface Props {
   onStop: () => void;
   onAnswer: (qid: number, answer: Answer) => void;
   findFiles: (query: string) => Promise<string[]>;
+  /** The secrets panel is open beside the transcript. */
+  secretsOpen: boolean;
+  onSecrets: (open: boolean) => void;
+  /** Rebuild the thread with the current settings and trust, keeping its conversation. */
+  onReload: () => void;
+  /** A reload is under way. */
+  reloading: boolean;
 }
 
-export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles }: Props) {
+export function ThreadView({
+  thread,
+  state,
+  onSend,
+  onStop,
+  onAnswer,
+  findFiles,
+  secretsOpen,
+  onSecrets,
+  onReload,
+  reloading,
+}: Props) {
+  const [reviewing, setReviewing] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const last = state.entries.at(-1);
   const lastLength = last && "text" in last ? last.text.length : 0;
@@ -46,7 +67,32 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles 
             session={state.usage}
             contextWindow={thread.contextWindow}
           />
+          <button
+            type="button"
+            onClick={() => onSecrets(!secretsOpen)}
+            aria-pressed={secretsOpen}
+            title="This thread's secrets"
+            className={`rounded px-1.5 text-xs hover:bg-panel-2 ${secretsOpen ? "bg-panel-2 text-text" : "text-muted"}`}
+          >
+            🔑 Secrets
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            disabled={state.running || reloading}
+            title="Reload this thread with the current settings and project trust, keeping the conversation"
+            className="rounded px-1.5 text-xs text-muted hover:bg-panel-2 hover:text-text disabled:opacity-40"
+          >
+            {reloading ? "Reloading…" : "↻ Reload"}
+          </button>
         </header>
+        {thread.project && (
+          <TrustBanner
+            key={`${thread.project.state}-${thread.project.skills.length}`}
+            project={thread.project}
+            onReview={() => setReviewing(true)}
+          />
+        )}
         {thread.memoryNote && (
           <div
             className="border-b border-border bg-panel-2 px-4 py-1 text-xs text-warn"
@@ -55,18 +101,34 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles 
             {thread.memoryNote}
           </div>
         )}
-        <main className="flex-1 overflow-y-auto px-4 py-3" aria-live="polite">
-          <div className="mx-auto max-w-4xl">
-            {state.entries.length === 0 && <Welcome thread={thread} />}
-            {state.entries.map((entry) => (
-              <EntryView key={entry.id} entry={entry} />
-            ))}
-            {state.running && !state.cancelling && !question && last?.kind !== "agent" && (
-              <div className="my-2 text-sm text-muted">Working…</div>
-            )}
-            <div ref={bottom} />
+        {thread.notes.map((note) => (
+          <div
+            key={note}
+            className="border-b border-border bg-panel-2 px-4 py-1 text-xs text-muted"
+            role="note"
+          >
+            {note}
           </div>
-        </main>
+        ))}
+        <div className="flex min-h-0 flex-1">
+          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3" aria-live="polite">
+            <div className="mx-auto max-w-4xl">
+              {state.entries.length === 0 && <Welcome thread={thread} />}
+              {state.entries.map((entry) => (
+                <EntryView key={entry.id} entry={entry} />
+              ))}
+              {state.running && !state.cancelling && !question && last?.kind !== "agent" && (
+                <div className="my-2 text-sm text-muted">Working…</div>
+              )}
+              <div ref={bottom} />
+            </div>
+          </main>
+          {secretsOpen && (
+            <div className="w-80 shrink-0 border-l border-border">
+              <SecretsPanel threadId={thread.threadId} onClose={() => onSecrets(false)} />
+            </div>
+          )}
+        </div>
         {question && question.kind !== "secret" && (
           <div className="max-h-[60vh] overflow-y-auto border-t border-border bg-bg px-4 py-3">
             <div className="mx-auto max-w-4xl">
@@ -90,8 +152,23 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles 
             name={question.name}
             reason={question.reason}
             replacing={question.replacing}
-            onEnter={(value) => onAnswer(question.qid, { type: "secret", value })}
-            onDecline={() => onAnswer(question.qid, { type: "secret", value: null })}
+            canRemember={question.canRemember}
+            onEnter={(value, remember) =>
+              onAnswer(question.qid, { type: "secret", value, remember })
+            }
+            onDecline={() =>
+              onAnswer(question.qid, { type: "secret", value: null, remember: false })
+            }
+          />
+        )}
+        {reviewing && (
+          <TrustDialog
+            threadId={thread.threadId}
+            onCancel={() => setReviewing(false)}
+            onTrusted={() => {
+              setReviewing(false);
+              onReload();
+            }}
           />
         )}
       </div>

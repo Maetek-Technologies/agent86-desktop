@@ -25,6 +25,8 @@ export function Sidebar({
   onRefresh,
   onSettings,
   settingsOpen,
+  onMemory,
+  memoryOpen,
 }: {
   list: SessionList | null;
   /** Session ids open in tabs. */
@@ -37,6 +39,8 @@ export function Sidebar({
   onSettings: () => void;
   /** The settings view is showing. */
   settingsOpen: boolean;
+  onMemory: () => void;
+  memoryOpen: boolean;
 }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
@@ -105,7 +109,17 @@ export function Sidebar({
           {list.note}
         </p>
       )}
-      <div className="border-t border-border p-2">
+      <div className="space-y-0.5 border-t border-border p-2">
+        <button
+          type="button"
+          onClick={onMemory}
+          aria-pressed={memoryOpen}
+          className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-panel-2 ${
+            memoryOpen ? "bg-panel-2 text-text" : "text-muted"
+          }`}
+        >
+          🧠 Memory
+        </button>
         <button
           type="button"
           onClick={onSettings}

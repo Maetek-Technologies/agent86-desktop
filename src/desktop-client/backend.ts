@@ -8,9 +8,16 @@ import type {
   DesktopEvent,
   ImportPreview,
   KeyStatus,
+  MemoryEntry,
+  MemoryKind,
+  MemoryPage,
   ModelInfo,
   OpenedThread,
+  ProjectContent,
   ProviderSettings,
+  ReloadedThread,
+  SecretList,
+  TrustedProject,
   SessionList,
   Settings,
   SettingsState,
@@ -23,9 +30,15 @@ export type {
   KeyStatus,
   ModelInfo,
   OpenedThread,
+  MemoryEntry,
+  MemoryPage,
+  ProjectContent,
+  ReloadedThread,
+  SecretList,
   SessionList,
   Settings,
   SettingsState,
+  TrustedProject,
 } from "./events.ts";
 
 export function appInfo(): Promise<AppInfo> {
@@ -122,4 +135,68 @@ export function answer(threadId: string, qid: number, answer: Answer): Promise<v
 
 export function closeThread(threadId: string): Promise<void> {
   return invoke("close_thread", { threadId });
+}
+
+/** Rebuild a thread with the current settings and project trust, keeping its conversation. */
+export function reloadThread(threadId: string): Promise<ReloadedThread> {
+  return invoke<ReloadedThread>("reload_thread", { threadId });
+}
+
+/** A page of facts or episodes from the memory database shared with the CLI, newest first. */
+export function listMemory(
+  kind: MemoryKind,
+  pinnedOnly: boolean,
+  offset: number,
+  limit: number,
+): Promise<MemoryPage> {
+  return invoke<MemoryPage>("list_memory", { kind, pinnedOnly, offset, limit });
+}
+
+/** Pin an entry (never pruned) or unpin it. Resolves to the entry as it now stands. */
+export function pinMemory(kind: MemoryKind, id: number, pinned: boolean): Promise<MemoryEntry> {
+  return invoke<MemoryEntry>("pin_memory", { kind, id, pinned });
+}
+
+/** Delete a fact or episode for good. */
+export function forgetMemory(kind: MemoryKind, id: number): Promise<void> {
+  return invoke("forget_memory", { kind, id });
+}
+
+/** The secrets a thread holds or its project remembers: names only. */
+export function listSecrets(threadId: string): Promise<SecretList> {
+  return invoke<SecretList>("list_secrets", { threadId });
+}
+
+/** Hold a secret for the thread, and in the keyring for the project if `remember`. */
+export function setSecret(
+  threadId: string,
+  name: string,
+  value: string,
+  remember: boolean,
+): Promise<SecretList> {
+  return invoke<SecretList>("set_secret", { threadId, name, value, remember });
+}
+
+/** Drop a secret from the thread and the project's keyring entries. */
+export function forgetSecret(threadId: string, name: string): Promise<SecretList> {
+  return invoke<SecretList>("forget_secret", { threadId, name });
+}
+
+/** What the thread's workspace would load once trusted (`null` when it brings nothing). */
+export function reviewProject(threadId: string): Promise<ProjectContent | null> {
+  return invoke<ProjectContent | null>("review_project", { threadId });
+}
+
+/** Trust the thread's workspace as reviewed. Rejected if it changed since. */
+export function trustProject(threadId: string, sha256: string): Promise<void> {
+  return invoke("trust_project", { threadId, sha256 });
+}
+
+export function trustedProjects(): Promise<TrustedProject[]> {
+  return invoke<TrustedProject[]>("trusted_projects");
+}
+
+/** Stop trusting a workspace. Resolves to whether it was trusted. */
+export function forgetTrust(workspace: string): Promise<boolean> {
+  return invoke<boolean>("forget_trust", { workspace });
 }

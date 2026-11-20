@@ -2,9 +2,13 @@ mod agent_factory;
 mod cli_import;
 mod commands;
 mod keys;
+mod memory_panel;
+mod panel_commands;
+mod secrets;
 mod sessions;
 mod settings;
 mod threads;
+mod trust;
 mod unstable;
 mod workspace_files;
 
@@ -20,6 +24,7 @@ pub fn run() {
             let config_dir = config_dir(app);
             app.manage(settings::SettingsStore::open(config_dir.as_deref()));
             app.manage(sessions::Sessions::new(config_dir.as_deref()));
+            app.manage(trust::TrustStore::open(config_dir.as_deref()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -41,6 +46,17 @@ pub fn run() {
             commands::cancel_turn,
             commands::answer,
             commands::close_thread,
+            commands::reload_thread,
+            panel_commands::list_memory,
+            panel_commands::pin_memory,
+            panel_commands::forget_memory,
+            panel_commands::list_secrets,
+            panel_commands::set_secret,
+            panel_commands::forget_secret,
+            panel_commands::review_project,
+            panel_commands::trust_project,
+            panel_commands::trusted_projects,
+            panel_commands::forget_trust,
         ])
         .run(tauri::generate_context!())
         .expect("error while running agent86-desktop");

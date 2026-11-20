@@ -53,6 +53,8 @@ function opened(threadId: string, workspace: string, sessionId: string, history:
     sessionId,
     history,
     memoryNote: null,
+    project: null,
+    notes: [] as string[],
   };
 }
 
@@ -381,4 +383,118 @@ test("settings: a save the core refuses shows its problems and keeps the draft",
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByText(/Choose the default model\./)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Discard changes" })).toBeTruthy();
+});
+
+test("trust: a project's skills wait for review; trusting reloads the thread", async () => {
+  const project = { state: "untrusted", skills: ["lint"], specialists: [], mcpServers: ["files"] };
+  const calls = backend((cmd, args) => {
+    if (cmd === "open_thread")
+      return { ...opened("t1", args.workspace as string, "new1"), project };
+    if (cmd === "review_project")
+      return {
+        workspace: "C:\\code\\demo",
+        skills: ["lint"],
+        specialists: [],
+        mcpServers: {},
+        config: '[mcp.servers.files]\ncommand = "npx"\n',
+        notes: ["MCP server files reads values from your keyring."],
+        files: [{ path: ".agent86/skills/lint/SKILL.md", bytes: 120 }],
+        sha256: "abc123",
+      };
+    if (cmd === "trust_project") return null;
+    if (cmd === "reload_thread")
+      return {
+        model: "vllm:qwen",
+        contextWindow: 32768,
+        capabilities: { ...capabilities, skills: ["code-reviewer", "lint"] },
+        project: { ...project, state: "trusted" },
+        notes: [],
+      };
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Choose a workspace/ }));
+  expect(await screen.findByText(/brings 1 skill, 1 MCP server, not loaded/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Review and trust" }));
+  expect(await screen.findByText(/reads values from your keyring/)).toBeTruthy();
+  expect(screen.getByLabelText("Project config file").textContent).toContain("mcp.servers.files");
+  fireEvent.click(screen.getByRole("button", { name: "Trust and reload the thread" }));
+  expect(await screen.findByText(/\[reloaded\] vllm:qwen with this project's skills/)).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "trust_project")?.args).toEqual({
+    threadId: "t1",
+    sha256: "abc123",
+  });
+  expect(screen.queryByRole("region", { name: "Project trust" })).toBeNull();
+});
+
+test("secrets: /secrets opens the panel; a secret is added and remembered", async () => {
+  let held = [{ name: "OLD_TOKEN", remembered: true }];
+  const calls = backend((cmd, args) => {
+    if (cmd === "list_secrets") return { secrets: held, canRemember: true };
+    if (cmd === "set_secret") {
+      held = [...held, { name: args.name as string, remembered: args.remember as boolean }];
+      return { secrets: held, canRemember: true };
+    }
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Choose a workspace/ }));
+  const box = await screen.findByLabelText("Prompt");
+  fireEvent.change(box, { target: { value: "/secrets" } });
+  fireEvent.keyDown(box, { key: "Escape" });
+  fireEvent.keyDown(box, { key: "Enter" });
+  const panel = await screen.findByRole("complementary", { name: "Secrets" });
+  expect(await within(panel).findByText("OLD_TOKEN")).toBeTruthy();
+  expect(within(panel).getByText("remembered")).toBeTruthy();
+  fireEvent.change(within(panel).getByLabelText("Secret name"), { target: { value: "API_KEY" } });
+  fireEvent.change(within(panel).getByLabelText("Secret value"), {
+    target: { value: "sk-123456789" },
+  });
+  fireEvent.click(within(panel).getByLabelText(/Remember for this project/));
+  fireEvent.click(within(panel).getByRole("button", { name: "Add" }));
+  expect(await within(panel).findByText("API_KEY")).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "set_secret")?.args).toEqual({
+    threadId: "t1",
+    name: "API_KEY",
+    value: "sk-123456789",
+    remember: true,
+  });
+  expect((within(panel).getByLabelText("Secret value") as HTMLInputElement).value).toBe("");
+  expect(calls.map((c) => c.cmd)).not.toContain("prompt");
+});
+
+test("memory: lists facts, pins one, and forgets one after confirming", async () => {
+  const fact = (id: number, text: string, pinned = false) => ({
+    kind: "fact",
+    id,
+    storedAt: 1_700_000_000,
+    text,
+    outcome: null,
+    sessionId: null,
+    category: "fact",
+    pinned,
+  });
+  const calls = backend((cmd, args) => {
+    if (cmd === "list_memory")
+      return { entries: [fact(2, "Uses pnpm"), fact(1, "Tabs, not spaces")], more: false };
+    if (cmd === "pin_memory") return fact(args.id as number, "Uses pnpm", true);
+    if (cmd === "forget_memory") return null;
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Memory/ }));
+  const panel = await screen.findByRole("complementary", { name: "Memory" });
+  expect(await within(panel).findByText("Uses pnpm")).toBeTruthy();
+  fireEvent.click(within(panel).getAllByRole("button", { name: "pin" })[0]!);
+  expect(await within(panel).findByText("pinned")).toBeTruthy();
+  fireEvent.click(within(panel).getAllByRole("button", { name: "forget" })[1]!);
+  fireEvent.click(within(panel).getByRole("button", { name: "Forget" }));
+  await waitFor(() => expect(within(panel).queryByText("Tabs, not spaces")).toBeNull());
+  expect(calls.find((c) => c.cmd === "list_memory")?.args).toEqual({
+    kind: "fact",
+    pinnedOnly: false,
+    offset: 0,
+    limit: 20,
+  });
+  expect(calls.find((c) => c.cmd === "forget_memory")?.args).toEqual({ kind: "fact", id: 1 });
 });

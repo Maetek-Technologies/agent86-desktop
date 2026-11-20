@@ -4,9 +4,12 @@ import type { Capabilities, TurnRequest } from "./events.ts";
 
 export type ListKind = "tools" | "skills" | "agents";
 
+export type PanelKind = "secrets" | "memory";
+
 export type Command =
   | { type: "turn"; turn: TurnRequest; display: string }
   | { type: "list"; list: ListKind }
+  | { type: "panel"; panel: PanelKind }
   | { type: "error"; message: string };
 
 /** One entry of the `/` menu. */
@@ -22,12 +25,16 @@ const LISTS: Record<ListKind, string> = {
   agents: "List the specialist sub-agents",
 };
 
+const PANELS: Record<PanelKind, string> = {
+  secrets: "Show this thread's secrets, and add one",
+  memory: "Show what Agent 86 remembers",
+};
+
 /** The `/` menu for a thread: the lists, `/agent` when there are specialists, then each skill. */
 export function commandsFor(capabilities: Capabilities): CommandInfo[] {
-  const commands: CommandInfo[] = Object.entries(LISTS).map(([name, description]) => ({
-    name,
-    description,
-  }));
+  const commands: CommandInfo[] = [...Object.entries(LISTS), ...Object.entries(PANELS)].map(
+    ([name, description]) => ({ name, description }),
+  );
   if (capabilities.specialists.length > 0) {
     commands.push({
       name: "agent",
@@ -41,7 +48,8 @@ export function commandsFor(capabilities: Capabilities): CommandInfo[] {
   return commands;
 }
 
-/** Read a line: `/tools`, `/skills`, `/agents`, `/agent <name> <task>`, `/<skill> [task]`, or a
+/** Read a line: `/tools`, `/skills`, `/agents`, `/secrets`, `/memory`, `/agent <name> <task>`,
+ * `/<skill> [task]`, or a
  * message (with the `@` paths the user picked from the menu). */
 export function parseCommand(
   text: string,
@@ -54,6 +62,7 @@ export function parseCommand(
   const name = slash[1]!;
   const rest = slash[2]!.trim();
   if (name in LISTS) return { type: "list", list: name as ListKind };
+  if (name in PANELS) return { type: "panel", panel: name as PanelKind };
   if (name === "agent") {
     const agent = /^(\S+)\s+([\s\S]+)$/.exec(rest);
     if (!agent) return { type: "error", message: "Usage: /agent <name> <task>" };

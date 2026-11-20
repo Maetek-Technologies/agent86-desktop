@@ -5,6 +5,8 @@ import { languageForPath } from "../highlight/languages.ts";
 import { argumentSummary, splitResult } from "../tools/approval.ts";
 import { DiffView } from "../tools/DiffView.tsx";
 import { relativePath } from "../tools/paths.ts";
+import { parseWorktree } from "../tools/worktree.ts";
+import { SubagentActivityView, WorktreeView } from "./SubagentView.tsx";
 import { useThread } from "./ThreadContext.ts";
 
 type Display = "awaiting" | "running" | "done" | "failed" | "declined" | "interrupted";
@@ -42,6 +44,7 @@ const KIND: Record<string, { icon: string; label: string }> = {
   python_exec: { icon: "❯", label: "run" },
   web_fetch: { icon: "⇣", label: "fetch" },
   delegate: { icon: "⇉", label: "delegate" },
+  agent: { icon: "⇉", label: "specialist" },
   use_skill: { icon: "✦", label: "skill" },
   request_secret: { icon: "🔑", label: "secret" },
   remember: { icon: "∴", label: "memory" },
@@ -81,6 +84,19 @@ function Result({ entry }: { entry: ToolEntry }) {
         {diff && <DiffView diff={diff} />}
       </div>
     );
+  }
+  if (entry.name === "delegate" || entry.name === "agent") {
+    const parsed = parseWorktree(output);
+    if (parsed) {
+      return (
+        <div className="space-y-2 px-3 py-2">
+          <pre className="max-h-96 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
+            {parsed.answer}
+          </pre>
+          <WorktreeView worktree={parsed.worktree} />
+        </div>
+      );
+    }
   }
   const language = entry.name === "read_file" && path ? languageForPath(path) : undefined;
   return (
@@ -137,6 +153,7 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
           <CopyButton text={path} label="path" />
         </div>
       )}
+      {entry.subagent && <SubagentActivityView activity={entry.subagent} />}
       {!open && entry.summary && (
         <div className="truncate border-t border-border px-3 py-1 pl-9 font-mono text-xs text-muted">
           {entry.summary}
