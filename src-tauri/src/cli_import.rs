@@ -343,7 +343,7 @@ fn servers_of(file: &File) -> (BTreeMap<String, McpServerSettings>, Vec<String>)
                 converted.enabled &= mcp_on;
                 if literal_secret(&converted) {
                     notes.push(format!(
-                        "MCP server {name} has a token written out in its settings. You can keep                          it in the keyring instead: store it as an entry and write ${{NAME}}."
+                        "MCP server {name} has a token written out in its settings. You can keep it in the keyring instead: store it as an entry and write ${{NAME}}."
                     ));
                 }
                 servers.insert(name.clone(), converted);

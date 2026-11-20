@@ -4,7 +4,7 @@ import type { Capabilities, TurnRequest } from "./events.ts";
 
 export type ListKind = "tools" | "skills" | "agents";
 
-export type PanelKind = "secrets" | "memory";
+export type PanelKind = "secrets" | "memory" | "logs";
 
 export type Command =
   | { type: "turn"; turn: TurnRequest; display: string }
@@ -28,6 +28,7 @@ const LISTS: Record<ListKind, string> = {
 const PANELS: Record<PanelKind, string> = {
   secrets: "Show this thread's secrets, and add one",
   memory: "Show what Agent 86 remembers",
+  logs: "Show the activity log and the app's log",
 };
 
 /** The `/` menu for a thread: the lists, `/agent` when there are specialists, then each skill. */

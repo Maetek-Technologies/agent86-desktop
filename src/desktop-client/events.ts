@@ -1,8 +1,11 @@
 // The IPC contract's types, generated from the Rust side by ts-rs (`cargo test` in src-tauri
 // writes ./generated; CI fails if they are stale). Import them from here.
+export type { ActivityEvent } from "./generated/ActivityEvent";
+export type { ActivityView } from "./generated/ActivityView";
 export type { AgentSettings } from "./generated/AgentSettings";
 export type { Answer } from "./generated/Answer";
 export type { AppInfo } from "./generated/AppInfo";
+export type { AppLogView } from "./generated/AppLogView";
 export type { Approval } from "./generated/Approval";
 export type { ApprovalChoice } from "./generated/ApprovalChoice";
 export type { ApprovalInfo } from "./generated/ApprovalInfo";
@@ -20,6 +23,7 @@ export type { KeyStatus } from "./generated/KeyStatus";
 export type { KeyUse } from "./generated/KeyUse";
 export type { LimitInfo } from "./generated/LimitInfo";
 export type { LimitSettings } from "./generated/LimitSettings";
+export type { LogLine } from "./generated/LogLine";
 export type { McpServerSettings } from "./generated/McpServerSettings";
 export type { McpTransport } from "./generated/McpTransport";
 export type { MemoryEntry } from "./generated/MemoryEntry";
@@ -51,6 +55,7 @@ export type { StopReason } from "./generated/StopReason";
 export type { SubagentUpdate } from "./generated/SubagentUpdate";
 export type { Theme } from "./generated/Theme";
 export type { ToolSettings } from "./generated/ToolSettings";
+export type { TraceSettings } from "./generated/TraceSettings";
 export type { Triage } from "./generated/Triage";
 export type { TrustState } from "./generated/TrustState";
 export type { TrustedProject } from "./generated/TrustedProject";

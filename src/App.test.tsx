@@ -106,6 +106,7 @@ function defaults(): Settings {
     },
     tools: { mentionMaxBytes: 200000 },
     ui: { theme: "system", notifications: true, tray: false, checkUpdates: false },
+    trace: { enabled: true, path: "~/.agent86/traces" },
     pricing: {},
     importedFrom: null,
   };
@@ -335,6 +336,68 @@ test("the header's permission menu changes what this thread may do, and goes bac
     threadId: "t1",
     approval: null,
   });
+});
+
+test("logs: shows activity with totals and problems, and the app log", async () => {
+  const calls = backend((cmd) => {
+    if (cmd === "read_activity")
+      return {
+        path: "/home/u/.agent86/traces/trace.jsonl",
+        note: null,
+        events: [
+          { ts: 1_763_625_121, session: "s-old", kind: "turn_start", fields: { task: "fix it" } },
+          {
+            ts: 1_763_625_122,
+            session: "s-old",
+            kind: "model_call",
+            fields: { model: "qwen", input_tokens: 100, output_tokens: 20, cost_usd: 0.5 },
+          },
+          {
+            ts: 1_763_625_123,
+            session: "s-old",
+            kind: "tool_call",
+            fields: { tool: "run_command", ok: false, arguments: {}, error: "exit 2" },
+          },
+        ],
+      };
+    if (cmd === "read_app_log")
+      return {
+        path: "/logs/agent86-desktop.log",
+        note: null,
+        lines: [
+          {
+            time: "2026-11-20 07:52:01",
+            level: "INFO",
+            target: "agent86_desktop_lib",
+            message: "Agent 86 started",
+          },
+          {
+            time: "2026-11-20 07:52:09",
+            level: "WARN",
+            target: "agent86_desktop_lib::commands",
+            message: "Turn failed in ws: boom",
+          },
+        ],
+      };
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Logs/ }));
+  expect(await screen.findByText("fix it")).toBeTruthy();
+  // Named by the saved session's title.
+  expect(screen.getAllByText("Fix the parser").length).toBeGreaterThan(0);
+  expect(screen.getByLabelText("Totals").textContent).toMatch(
+    /3 events · 1 model calls .* \$0\.5000/,
+  );
+  fireEvent.change(screen.getByLabelText("Show"), { target: { value: "problems" } });
+  await waitFor(() => expect(screen.queryByText("fix it")).toBeNull());
+  expect(screen.getByText(/run_command ✗/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("tab", { name: "App log" }));
+  expect(await screen.findByText("Turn failed in ws: boom")).toBeTruthy();
+  fireEvent.click(screen.getByLabelText("Warnings and errors only"));
+  await waitFor(() => expect(screen.queryByText("Agent 86 started")).toBeNull());
+  expect(calls.map((c) => c.cmd)).toContain("read_app_log");
 });
 
 test("closes a tab and its thread", async () => {

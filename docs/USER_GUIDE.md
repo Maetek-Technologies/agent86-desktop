@@ -126,6 +126,25 @@ by a click.
   you review and trust them, and again after any change to them. **Settings, Projects** lists the
   projects you trust.
 
+## Logs
+
+**Logs** in the sidebar (or `/logs` in a thread) shows two records, newest first:
+
+- **Activity:** what the agent did, from agent86's activity log: each turn's start and end, every
+  model call (model, tokens in and out, cost, why it stopped, which tools it asked for), every tool
+  call (with its arguments and whether it worked), guardrail hits, and errors. Filter by kind
+  (turns, model calls, tool calls, or problems), by the thread you are in, or by any text; the top
+  line adds up the tokens and cost of what is shown. Click an event for all its details.
+- **App log:** what the app itself did: starting, settings saved, threads opened and closed, turns
+  started and ended, model and permission changes, update checks, and anything that went wrong.
+  Tick **Warnings and errors only** to see just the problems.
+
+**Live** refreshes the view every two seconds; **Reveal file** shows the file in Explorer or
+Finder. Secrets are scrubbed from the activity log before it is written, and large text is clipped;
+the file rotates at 50 MB. Turn it off, or move it, in **Settings, Logs**. By default it is the
+agent86 CLI's own (`~/.agent86/traces/trace.jsonl`), so `agent86 trace` and the app share one
+record.
+
 ## Appearance, notifications, and shortcuts
 
 **Settings, Appearance** sets the theme (as the system, light, or dark), notifications, and a tray
@@ -160,6 +179,8 @@ AppImage, **Restart now** finishes. A `.deb` or `.rpm` install is updated with y
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
 | Settings, window state, trusted projects, session folders | `%APPDATA%\com.maetek.agent86.desktop` (Windows), `~/Library/Application Support/com.maetek.agent86.desktop` (macOS), `~/.config/com.maetek.agent86.desktop` (Linux) |
 | Sessions and memory          | `~/.agent86/memory.db`, shared with the CLI                                               |
+| Activity log                 | `~/.agent86/traces/trace.jsonl`, shared with the CLI (Settings, Logs)                      |
+| App log                      | `%LOCALAPPDATA%\com.maetek.agent86.desktop\logs` (Windows), `~/Library/Logs/com.maetek.agent86.desktop` (macOS), `~/.local/share/com.maetek.agent86.desktop/logs` (Linux) |
 | API keys and kept secrets    | The system keyring, service `agent86`                                                      |
 
 To start over, quit the app and delete the settings folder; your sessions, memory, and keys stay.
@@ -178,5 +199,7 @@ AppImage (Linux); the folders above are left for you to delete.
   (`all-MiniLM-L6-v2`) could not be loaded, for example because it is not downloaded yet and
   **Settings, Memory** keeps the app offline. The thread still runs and is saved, but what it
   remembers is not found by the CLI, and the other way round, until the model loads.
+- **Something went wrong and you are not sure what:** open **Logs**, pick **Problems** on the
+  Activity tab or **Warnings and errors only** on the App log tab.
 - **Report a problem:** [open an issue](https://github.com/Maetek-Technologies/agent86-desktop/issues)
   with the version from **Settings, About**.

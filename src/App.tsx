@@ -39,6 +39,7 @@ import { Sidebar } from "./shell/Sidebar.tsx";
 import { Tabs } from "./shell/Tabs.tsx";
 import { applyTheme } from "./shell/theme.ts";
 import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
+import { LogsView } from "./logs/LogsView.tsx";
 import { MemoryPanel } from "./memory/MemoryPanel.tsx";
 import { FirstRun } from "./settings/FirstRun.tsx";
 import { SettingsView, type SectionName } from "./settings/SettingsView.tsx";
@@ -61,6 +62,7 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SectionName>("Model");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [showMemory, setShowMemory] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [opening, setOpening] = useState(false);
   const [state, dispatchTabs] = useReducer(tabsReduce, NO_TABS);
   const stateRef = useRef(state);
@@ -182,6 +184,15 @@ export function App() {
     });
     if (notice) void notify(notice.title, notice.body, key).catch(() => {});
   }, []);
+
+  // Sessions named for the Logs view: open tabs by their title, then saved sessions.
+  const logTitles = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const [id, title] of titles) if (title) names.set(id, title);
+    for (const tab of state.tabs) if (tab.opened) names.set(tab.opened.sessionId, titleOf(tab));
+    return names;
+  }, [titles, state.tabs, titleOf]);
+  const activeSession = state.tabs.find((t) => t.key === state.active)?.opened?.sessionId ?? null;
 
   const openSessions = useMemo(
     () => new Set(state.tabs.flatMap((t) => (t.opened ? [t.opened.sessionId] : []))),
@@ -349,6 +360,8 @@ export function App() {
         memoryOpen={showMemory}
         update={update}
         onUpdate={() => openSettings("About")}
+        onLogs={() => setShowLogs((open) => !open)}
+        logsOpen={showLogs}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {state.tabs.length > 0 && (
@@ -381,7 +394,12 @@ export function App() {
               hidden={tab.key !== state.active}
             >
               {tab.opened ? (
-                <TabView tab={tab} dispatchTab={dispatch} onMemory={() => setShowMemory(true)} />
+                <TabView
+                  tab={tab}
+                  dispatchTab={dispatch}
+                  onMemory={() => setShowMemory(true)}
+                  onLogs={() => setShowLogs(true)}
+                />
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-muted">
                   Opening {folderName(tab.workspace)}…
@@ -401,6 +419,15 @@ export function App() {
           {showMemory && (
             <div className="absolute inset-y-0 right-0 z-20 w-96 border-l border-border shadow-xl">
               <MemoryPanel onClose={() => setShowMemory(false)} />
+            </div>
+          )}
+          {showLogs && (
+            <div className="absolute inset-0 z-10">
+              <LogsView
+                titles={logTitles}
+                session={activeSession}
+                onClose={() => setShowLogs(false)}
+              />
             </div>
           )}
           {showSettings && ready && (
@@ -426,10 +453,12 @@ function TabView({
   tab,
   dispatchTab,
   onMemory,
+  onLogs,
 }: {
   tab: Tab;
   dispatchTab: (action: TabsAction) => void;
   onMemory: () => void;
+  onLogs: () => void;
 }) {
   const opened = tab.opened!;
   const key = tab.key;
@@ -451,6 +480,7 @@ function TabView({
         }
         case "panel":
           if (command.panel === "secrets") setSecretsOpen(true);
+          else if (command.panel === "logs") onLogs();
           else onMemory();
           return;
         case "error":
@@ -463,7 +493,7 @@ function TabView({
           );
       }
     },
-    [opened, local, onMemory],
+    [opened, local, onMemory, onLogs],
   );
 
   const reload = useCallback(() => {

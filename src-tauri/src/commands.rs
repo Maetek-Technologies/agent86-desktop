@@ -7,6 +7,7 @@ use crate::cli_import::{self, ImportPreview};
 use crate::desktop;
 use crate::file_actions;
 use crate::keys::{self, KeyStatus, OsKeys};
+use crate::logs::{self, ActivityView, AppLogView, LogPaths};
 use crate::sessions::{SessionList, Sessions};
 use crate::settings::{self, Approval, ProviderPreset, ProviderSettings, Settings, SettingsStore};
 use crate::threads::actor::{Capabilities, ThreadOptions};
@@ -156,7 +157,13 @@ pub fn get_settings(app: tauri::AppHandle) -> SettingsState {
 /// Check and keep `settings`; threads opened from now on use them. Fails listing every problem.
 #[tauri::command]
 pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
-    let saved = app.state::<SettingsStore>().save(settings)?;
+    let saved = app
+        .state::<SettingsStore>()
+        .save(settings)
+        .inspect_err(|problems| {
+            log::info!("Settings were not saved: {}", problems.replace('\n', "; "))
+        })?;
+    log::info!("Settings saved");
     desktop::apply_ui(&app, &saved.ui);
     Ok(saved)
 }
@@ -269,7 +276,18 @@ pub async fn open_thread(
 ) -> Result<OpenedThread, String> {
     // Loading the embedder (first time) and building the agent block, so not on an async worker.
     tauri::async_runtime::spawn_blocking(move || {
-        open_thread_blocking(&app, &workspace, session_id, on_event)
+        let opened = open_thread_blocking(&app, &workspace, session_id, on_event);
+        match &opened {
+            Ok(thread) => log::info!(
+                "Thread {} opened in {} on {} (session {})",
+                thread.thread_id,
+                thread.workspace,
+                thread.model,
+                thread.session_id
+            ),
+            Err(error) => log::warn!("A thread could not be opened in {workspace}: {error}"),
+        }
+        opened
     })
     .await
     .map_err(|error| error.to_string())?
@@ -299,6 +317,7 @@ fn open_thread_blocking(
     let resume = session_id.clone();
     let mut builder = setup.plan.builder;
     let app_for_events = app.clone();
+    let log_name = workspace.display().to_string();
 
     let opened = threads.open(
         Box::new(move || {
@@ -311,10 +330,24 @@ fn open_thread_blocking(
             Ok(builder)
         }),
         Arc::new(move |event| {
-            let ended = matches!(
-                event,
-                DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. }
-            );
+            let ended = match &event {
+                DesktopEvent::TurnEnded {
+                    stop_reason, usage, ..
+                } => {
+                    log::info!(
+                        "Turn ended in {log_name} ({stop_reason:?}; {} in / {} out tokens, ${:.4})",
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cost_usd
+                    );
+                    true
+                }
+                DesktopEvent::TurnFailed { error } => {
+                    log::warn!("Turn failed in {log_name}: {error}");
+                    true
+                }
+                _ => false,
+            };
             // A send fails only when the page has gone; the thread goes on regardless.
             let _ = on_event.send(event);
             if ended {
@@ -482,11 +515,26 @@ fn rebuild(
     let threads = app.state::<ThreadManager>();
     let workspace = threads.workspace(thread_id)?;
     let settings = settings_for(app.state::<SettingsStore>().require()?, overrides);
+    let result = rebuild_with(app, thread_id, overrides, &settings, &workspace);
+    if let Err(error) = &result {
+        log::warn!("Thread {thread_id} was not rebuilt: {error}");
+    }
+    result
+}
+
+fn rebuild_with(
+    app: &tauri::AppHandle,
+    thread_id: &str,
+    overrides: &ThreadOverrides,
+    settings: &Settings,
+    workspace: &Path,
+) -> Result<ReloadedThread, String> {
+    let threads = app.state::<ThreadManager>();
     if let Some(model) = &overrides.model {
         // Say plainly what is wrong (no such provider, no key) before touching the thread.
-        agent_factory::model(&settings, model, &OsKeys)?;
+        agent_factory::model(settings, model, &OsKeys)?;
     }
-    let setup = prepare(app, &settings, &workspace)?;
+    let setup = prepare(app, settings, workspace)?;
     // The conversation comes over from the old agent; memory keeps saving it.
     let memory = app.state::<Sessions>().memory(&settings.memory).ok();
     let mut builder = setup.plan.builder;
@@ -499,6 +547,21 @@ fn rebuild(
             Ok(builder)
         }),
     )?;
+    log::info!(
+        "Thread {thread_id} rebuilt on {} with approval {:?}{}{}",
+        setup.plan.model,
+        settings.guardrails.approval,
+        if overrides.model.is_some() {
+            " (own model)"
+        } else {
+            ""
+        },
+        if overrides.approval.is_some() {
+            " (own approval)"
+        } else {
+            ""
+        }
+    );
     Ok(ReloadedThread {
         model: setup.plan.model,
         own_model: overrides.model.is_some(),
@@ -632,7 +695,13 @@ pub fn prompt(
     thread_id: String,
     turn: TurnRequest,
 ) -> Result<(), String> {
+    let kind = match &turn {
+        TurnRequest::Goal { .. } => "message",
+        TurnRequest::Skill { .. } => "skill",
+        TurnRequest::Specialist { .. } => "specialist",
+    };
     threads.prompt(&thread_id, turn)?;
+    log::info!("Thread {thread_id}: turn started ({kind})");
     desktop::refresh_tray(&app);
     Ok(())
 }
@@ -670,6 +739,7 @@ pub fn close_thread(
     thread_id: String,
 ) -> Result<(), String> {
     threads.close(&thread_id)?;
+    log::info!("Thread {thread_id} closed");
     desktop::refresh_tray(&app);
     Ok(())
 }
@@ -708,8 +778,11 @@ pub async fn open_path(
     use tauri_plugin_opener::OpenerExt;
     let roots = app.state::<ThreadManager>().file_roots(&thread_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let resolved = file_actions::resolve(&path, &roots)?;
+        let resolved = file_actions::resolve(&path, &roots).inspect_err(|error| {
+            log::warn!("Open refused: {error}");
+        })?;
         if !reveal && file_actions::runs_when_opened(&resolved) {
+            log::warn!("Open refused: {path} would run if opened");
             return Err(format!(
                 "{path} would run if opened, so the app only reveals it in the file manager."
             ));
@@ -747,6 +820,77 @@ pub async fn install_update(
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
     app.restart()
+}
+
+/// The last `limit` events of agent86's activity log (the flight recorder), oldest first.
+#[tauri::command]
+pub async fn read_activity(app: tauri::AppHandle, limit: Option<usize>) -> ActivityView {
+    let limit = limit.unwrap_or(1000).clamp(1, 20_000);
+    let dir = app
+        .state::<SettingsStore>()
+        .get()
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .trace
+        .dir();
+    tauri::async_runtime::spawn_blocking(move || {
+        logs::read_activity(dir.map(|dir| logs::trace_file(&dir)).as_deref(), limit)
+    })
+    .await
+    .unwrap_or_else(|error| ActivityView {
+        path: None,
+        events: Vec::new(),
+        note: Some(error.to_string()),
+    })
+}
+
+/// The last `limit` entries of the app's own log, oldest first.
+#[tauri::command]
+pub async fn read_app_log(app: tauri::AppHandle, limit: Option<usize>) -> AppLogView {
+    let limit = limit.unwrap_or(1000).clamp(1, 20_000);
+    let path = app.state::<LogPaths>().app_log.clone();
+    tauri::async_runtime::spawn_blocking(move || logs::read_app_log(path.as_deref(), limit))
+        .await
+        .unwrap_or_else(|error| AppLogView {
+            path: None,
+            lines: Vec::new(),
+            note: Some(error.to_string()),
+        })
+}
+
+/// Show a log file in Explorer or Finder: `activity` (agent86's trace) or `app` (the app's log).
+#[tauri::command]
+pub async fn reveal_log(app: tauri::AppHandle, which: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = match which.as_str() {
+        "activity" => app
+            .state::<SettingsStore>()
+            .get()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .trace
+            .dir()
+            .map(|dir| logs::trace_file(&dir)),
+        "app" => app.state::<LogPaths>().app_log.clone(),
+        _ => None,
+    }
+    .ok_or("There is no such log.")?;
+    // The file when it exists, else its folder.
+    let target = if path.exists() {
+        path
+    } else {
+        path.parent()
+            .map(Path::to_path_buf)
+            .ok_or("There is no such log.")?
+    };
+    if !target.exists() {
+        return Err(format!("{} does not exist yet.", target.display()));
+    }
+    app.opener()
+        .reveal_item_in_dir(&target)
+        .map_err(|error| format!("{}: {error}", target.display()))
 }
 
 /// An existing directory, made absolute with symlinks followed, as agent86-core's jail sees it.

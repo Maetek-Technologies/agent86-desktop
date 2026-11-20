@@ -52,7 +52,15 @@ pub enum UpdateProgress {
 /// Ask GitHub Releases for a newer version. `None` when this is the latest.
 pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
     let updater = app.updater().map_err(describe)?;
-    let found = updater.check().await.map_err(describe)?;
+    let found = updater.check().await.map_err(|error| {
+        let text = describe(error);
+        log::info!("Update check: {text}");
+        text
+    })?;
+    match &found {
+        Some(update) => log::info!("Update check: version {} is available", update.version),
+        None => log::info!("Update check: this is the latest version"),
+    }
     let info = found.as_ref().map(|update| UpdateInfo {
         version: update.version.clone(),
         current_version: update.current_version.clone(),
@@ -69,6 +77,7 @@ pub async fn install(app: &AppHandle, progress: Channel<UpdateProgress>) -> Resu
     let update = lock(&app.state::<Updates>().found)
         .clone()
         .ok_or("Check for updates first.")?;
+    log::info!("Installing version {}", update.version);
     let mut downloaded = 0u64;
     let on_finish = progress.clone();
     update
@@ -82,7 +91,11 @@ pub async fn install(app: &AppHandle, progress: Channel<UpdateProgress>) -> Resu
             },
         )
         .await
-        .map_err(describe)
+        .map_err(|error| {
+            let text = describe(error);
+            log::warn!("The update was not installed: {text}");
+            text
+        })
 }
 
 /// The updater's errors in the user's terms.

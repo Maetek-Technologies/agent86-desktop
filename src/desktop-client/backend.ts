@@ -4,7 +4,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  ActivityView,
   Answer,
+  AppLogView,
   Approval,
   AppInfo,
   DesktopEvent,
@@ -206,6 +208,21 @@ export function setThreadApproval(
   approval: Approval | null,
 ): Promise<ReloadedThread> {
   return invoke<ReloadedThread>("set_thread_approval", { threadId, approval });
+}
+
+/** The last `limit` events of agent86's activity log (its flight recorder), oldest first. */
+export function readActivity(limit = 1000): Promise<ActivityView> {
+  return invoke<ActivityView>("read_activity", { limit });
+}
+
+/** The last `limit` entries of the app's own log, oldest first. */
+export function readAppLog(limit = 1000): Promise<AppLogView> {
+  return invoke<AppLogView>("read_app_log", { limit });
+}
+
+/** Show the activity log's or the app log's file in Explorer or Finder. */
+export function revealLog(which: "activity" | "app"): Promise<void> {
+  return invoke("reveal_log", { which });
 }
 
 /** Rebuild a thread with the current settings and project trust, keeping its conversation. */

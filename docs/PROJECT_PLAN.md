@@ -248,6 +248,14 @@ back to the settings' model. Beside it, a permission menu (`PermissionPicker`, `
 sets the thread's approval mode (Ask, Auto, Read-only = agent86's `deny`) the same way; both
 choices are the thread's `ThreadOverrides`, laid over the settings on every rebuild.
 
+**1.0.1: logs.** Each thread's agent writes agent86's flight recorder (`AgentBuilder::trace_dir`,
+redacted and rotated by agent86) to `settings.trace` (on by default, the CLI's
+`~/.agent86/traces`); the app logs its own events through `tauri-plugin-log` (info and up from
+the app, warnings from libraries; 5 MB files, two kept; beside a separate profile's settings, else
+the platform's log folder). `logs.rs` reads the end of either file (4 MB at most) for the Logs
+view (`read_activity`, `read_app_log`, `reveal_log`); the view summarises events, totals tokens and
+cost, filters by kind, thread, and text, and refreshes live.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives

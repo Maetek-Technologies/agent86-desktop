@@ -30,6 +30,8 @@ export function Sidebar({
   memoryOpen,
   update = null,
   onUpdate,
+  onLogs,
+  logsOpen = false,
 }: {
   list: SessionList | null;
   /** Session ids open in tabs. */
@@ -47,6 +49,8 @@ export function Sidebar({
   /** A newer version the startup check found. */
   update?: UpdateInfo | null;
   onUpdate?: () => void;
+  onLogs?: () => void;
+  logsOpen?: boolean;
 }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
@@ -135,6 +139,16 @@ export function Sidebar({
           }`}
         >
           🧠 Memory
+        </button>
+        <button
+          type="button"
+          onClick={onLogs}
+          aria-pressed={logsOpen}
+          className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-panel-2 ${
+            logsOpen ? "bg-panel-2 text-text" : "text-muted"
+          }`}
+        >
+          📜 Logs
         </button>
         <button
           type="button"

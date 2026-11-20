@@ -50,6 +50,7 @@ const SECTIONS = [
   "Memory",
   "Projects",
   "Appearance",
+  "Logs",
   "About",
 ] as const;
 export type SectionName = (typeof SECTIONS)[number];
@@ -163,6 +164,7 @@ export function SettingsView({
             )}
             {section === "Projects" && <ProjectsSection />}
             {section === "Appearance" && <AppearanceSection draft={draft} onChange={change} />}
+            {section === "Logs" && <LogsSection draft={draft} onChange={change} />}
             {section === "About" && (
               <AboutSection
                 found={update}
@@ -727,6 +729,31 @@ export function ImportSummary({
         </button>
       </div>
     </div>
+  );
+}
+
+/** agent86's activity log (its flight recorder), shown in the Logs view. */
+function LogsSection({ draft, onChange }: Props) {
+  const trace = draft.trace;
+  const setTrace = (patch: Partial<Settings["trace"]>) =>
+    onChange({ ...draft, trace: { ...trace, ...patch } });
+  return (
+    <Section
+      title="Activity log"
+      intro="agent86 records each turn, model call (tokens and cost), tool call, guardrail hit, and error in a trace file, with secrets scrubbed and large text clipped; it rotates at 50 MB. The Logs view (sidebar, or /logs) shows it, beside the app's own log. Threads opened or reloaded after a change use it."
+    >
+      <Toggle
+        label="Record activity"
+        checked={trace.enabled}
+        onChange={(enabled) => setTrace({ enabled })}
+      />
+      <TextField
+        label="Folder"
+        hint="trace.jsonl is written here. The default is the agent86 CLI's, so `agent86 trace` and the app share one record."
+        value={trace.path}
+        onChange={(path) => setTrace({ path })}
+      />
+    </Section>
   );
 }
 

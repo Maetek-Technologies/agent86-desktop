@@ -1,6 +1,6 @@
 [package]
 name = "agent86-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "A desktop app for agent86"
 license = "MIT"
 edition = "2021"
@@ -21,6 +21,9 @@ tauri = { version = "2", features = ["tray-icon"] }
 # Plugins are used from Rust only; the webview is granted none of their permissions
 # (capabilities/default.json, docs/PROJECT_PLAN.md section 5).
 tauri-plugin-dialog = "2"
+# The app's own log file, read by the Logs view (src/logs.rs).
+tauri-plugin-log = "2"
+log = "0.4"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"

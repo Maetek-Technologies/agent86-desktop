@@ -294,7 +294,7 @@ pub fn thread_plan(
         for (name, server) in project.mcp_servers.iter().filter(|(_, s)| s.enabled) {
             if settings.mcp_servers.contains_key(name) {
                 notes.push(format!(
-                    "The project's MCP server {name} was not started: your settings have one of                      that name."
+                    "The project's MCP server {name} was not started: your settings have one of that name."
                 ));
                 continue;
             }
@@ -316,6 +316,16 @@ pub fn thread_plan(
             subagents = subagents.specialists_dir(dir);
         }
         builder = builder.subagents(subagents);
+    }
+    if let Some(dir) = settings.trace.dir() {
+        // The SDK refuses to build when the folder cannot be made; the thread runs unrecorded.
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => builder = builder.trace_dir(dir),
+            Err(error) => notes.push(format!(
+                "Activity is not recorded: {} could not be created ({error}).",
+                dir.display()
+            )),
+        }
     }
     Ok(ThreadPlan {
         builder,

@@ -60,6 +60,7 @@ describe("commandsFor", () => {
       "agents",
       "secrets",
       "memory",
+      "logs",
       "agent",
       "code-reviewer",
       "outline-wiki",
@@ -71,6 +72,7 @@ describe("commandsFor", () => {
 
   it("opens the secrets and memory panels", () => {
     expect(parseCommand("/secrets", caps)).toEqual({ type: "panel", panel: "secrets" });
+    expect(parseCommand("/logs", caps)).toEqual({ type: "panel", panel: "logs" });
     expect(parseCommand("/memory", caps)).toEqual({ type: "panel", panel: "memory" });
   });
 

@@ -4,6 +4,7 @@ mod commands;
 mod desktop;
 mod file_actions;
 mod keys;
+mod logs;
 mod memory_panel;
 mod panel_commands;
 mod secrets;
@@ -30,11 +31,35 @@ pub fn run() {
     }
     // The window's size and place are kept beside the settings (an absolute file name replaces
     // the plugin's own folder, so a separate profile keeps its own).
+    // The app's log: beside a separate profile's settings, else in the platform's log folder.
+    // Info and up from the app; only warnings from the libraries under it.
+    let log_target = match &config_override {
+        Some(dir) => tauri_plugin_log::TargetKind::Folder {
+            path: dir.join("logs"),
+            file_name: Some(LOG_FILE.to_owned()),
+        },
+        None => tauri_plugin_log::TargetKind::LogDir {
+            file_name: Some(LOG_FILE.to_owned()),
+        },
+    };
+    let logger = tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .target(tauri_plugin_log::Target::new(log_target))
+        .target(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::Stdout,
+        ))
+        .level(log::LevelFilter::Warn)
+        .level_for("agent86_desktop_lib", log::LevelFilter::Info)
+        .max_file_size(5_000_000)
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(2))
+        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+        .build();
     let window_state_file = match &config_override {
         Some(dir) => dir.join("window-state.json").display().to_string(),
         None => "window-state.json".to_owned(),
     };
     builder
+        .plugin(logger)
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_filename(window_state_file)
@@ -53,6 +78,22 @@ pub fn run() {
             let config_dir = config_override
                 .clone()
                 .or_else(|| app.path().app_config_dir().ok());
+            let app_log = match &config_override {
+                Some(dir) => Some(dir.join("logs")),
+                None => app.path().app_log_dir().ok(),
+            }
+            .map(|dir| dir.join(format!("{LOG_FILE}.log")));
+            app.manage(logs::LogPaths { app_log });
+            log::info!(
+                "Agent 86 {} started on {}/{}; settings in {}",
+                app.package_info().version,
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                config_dir
+                    .as_deref()
+                    .map(|dir| dir.display().to_string())
+                    .unwrap_or_else(|| "no folder".into())
+            );
             let store = settings::SettingsStore::open(config_dir.as_deref());
             let ui = store.get().ok().flatten().map(|s| s.ui).unwrap_or_default();
             app.manage(store);
@@ -90,6 +131,9 @@ pub fn run() {
             commands::check_update,
             commands::install_update,
             commands::restart_app,
+            commands::read_activity,
+            commands::read_app_log,
+            commands::reveal_log,
             panel_commands::list_memory,
             panel_commands::pin_memory,
             panel_commands::forget_memory,
@@ -104,6 +148,9 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running agent86-desktop");
 }
+
+/// The app log's file name, without `.log`.
+const LOG_FILE: &str = "agent86-desktop";
 
 /// `AGENT86_DESKTOP_CONFIG_DIR`, when set: a config folder used instead of the platform's (for
 /// trying the app without touching its real settings, such as a first run).

@@ -9,6 +9,7 @@ import type { ModelSettings } from "./ModelSettings";
 import type { ProviderSettings } from "./ProviderSettings";
 import type { SkillSettings } from "./SkillSettings";
 import type { ToolSettings } from "./ToolSettings";
+import type { TraceSettings } from "./TraceSettings";
 import type { UiSettings } from "./UiSettings";
 
 export type Settings = { version: number, model: ModelSettings, 
@@ -21,6 +22,10 @@ providers: { [key in string]: ProviderSettings }, limits: LimitSettings, guardra
  * How the app itself looks and behaves: theme, notifications, tray icon.
  */
 ui: UiSettings, 
+/**
+ * agent86's activity log (its flight recorder), shown in the Logs view.
+ */
+trace: TraceSettings, 
 /**
  * USD per million tokens by `provider:model` (or bare model id), for models agent86 has no
  * built-in price for. Imported from the CLI's `[pricing.models]`.

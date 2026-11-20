@@ -41,7 +41,7 @@ pub fn apply_ui(app: &AppHandle, ui: &UiSettings) {
     }
     if ui.tray {
         if let Err(error) = show_tray(app) {
-            eprintln!("agent86-desktop: could not show the tray icon: {error}");
+            log::warn!("Could not show the tray icon: {error}");
         }
     } else {
         hide_tray(app);
@@ -167,7 +167,10 @@ pub fn notify(app: &AppHandle, title: &str, body: &str, tab: Option<String>) -> 
         .title(title)
         .body(body)
         .show()
-        .map_err(|error| error.to_string())
+        .map_err(|error| {
+            log::warn!("A notification could not be shown: {error}");
+            error.to_string()
+        })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

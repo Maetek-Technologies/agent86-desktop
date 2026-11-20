@@ -17,7 +17,8 @@ Rust back end that embeds the agent in-process through
 > when a background thread needs you or a long turn ends, remembers its window, runs as a single
 > instance, can show a tray icon with the running turns, opens or reveals the files tool cards
 > show, switches a thread's model (from each provider's list) and permissions (ask, auto, read-only)
-> from its header, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
+> from its header, shows the agent's activity (tokens, cost, tool calls) and its own log in a Logs
+> view, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
 > updates itself from GitHub Releases. The plan and milestones are in
 > [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 

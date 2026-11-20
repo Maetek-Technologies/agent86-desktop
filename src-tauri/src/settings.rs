@@ -36,6 +36,8 @@ pub struct Settings {
     pub tools: ToolSettings,
     /// How the app itself looks and behaves: theme, notifications, tray icon.
     pub ui: UiSettings,
+    /// agent86's activity log (its flight recorder), shown in the Logs view.
+    pub trace: TraceSettings,
     /// USD per million tokens by `provider:model` (or bare model id), for models agent86 has no
     /// built-in price for. Imported from the CLI's `[pricing.models]`.
     pub pricing: BTreeMap<String, ModelPrice>,
@@ -57,6 +59,7 @@ impl Default for Settings {
             memory: MemorySettings::default(),
             tools: ToolSettings::default(),
             ui: UiSettings::default(),
+            trace: TraceSettings::default(),
             pricing: BTreeMap::new(),
             imported_from: None,
         }
@@ -534,6 +537,34 @@ impl Default for ToolSettings {
         Self {
             mention_max_bytes: 200_000,
         }
+    }
+}
+
+/// agent86's flight recorder: a redacted, size-capped `trace.jsonl` of turns, model calls, tool
+/// calls, guardrail hits, and errors, written by every thread's agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct TraceSettings {
+    pub enabled: bool,
+    /// The folder `trace.jsonl` is written in. The default is the CLI's, so `agent86 trace` and
+    /// the app read the same record.
+    pub path: String,
+}
+
+impl Default for TraceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: "~/.agent86/traces".to_owned(),
+        }
+    }
+}
+
+impl TraceSettings {
+    /// The folder to record in, when recording is on.
+    pub fn dir(&self) -> Option<PathBuf> {
+        (self.enabled && !self.path.trim().is_empty()).then(|| expand_home(self.path.trim()))
     }
 }
 
