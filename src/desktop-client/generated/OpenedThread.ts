@@ -13,6 +13,11 @@ workspace: string, model: string,
  */
 contextWindow: number, capabilities: Capabilities, 
 /**
+ * The thread runs on a model chosen in its header rather than the settings' (always false
+ * for a thread just opened).
+ */
+ownModel: boolean, 
+/**
  * The agent86 session this thread saves to (new, or the one reopened).
  */
 sessionId: string, 

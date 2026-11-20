@@ -16,7 +16,7 @@ Rust back end that embeds the agent in-process through
 > (including isolated runs in git worktrees) shows on their delegation's card. It notifies you
 > when a background thread needs you or a long turn ends, remembers its window, runs as a single
 > instance, can show a tray icon with the running turns, opens or reveals the files tool cards
-> show, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
+> show, switches a thread's model from a menu of each provider's models, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
 > updates itself from GitHub Releases. The plan and milestones are in
 > [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 

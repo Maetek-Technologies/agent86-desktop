@@ -10,6 +10,7 @@ import { PermissionPanel } from "../tools/PermissionPanel.tsx";
 import { LimitPanel } from "./LimitPanel.tsx";
 import { PromptInput } from "./PromptInput.tsx";
 import { ContextMeter, TurnSummaryLine } from "./Spend.tsx";
+import { ModelPicker } from "./ModelPicker.tsx";
 import { ThreadContext } from "./ThreadContext.ts";
 import { ToolCard } from "./ToolCard.tsx";
 
@@ -27,6 +28,8 @@ interface Props {
   onReload: () => void;
   /** A reload is under way. */
   reloading: boolean;
+  /** Switch this thread's model (`""`: back to the settings' model). */
+  onModel: (reference: string) => void;
 }
 
 export function ThreadView({
@@ -40,6 +43,7 @@ export function ThreadView({
   onSecrets,
   onReload,
   reloading,
+  onModel,
 }: Props) {
   const [reviewing, setReviewing] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
@@ -61,7 +65,13 @@ export function ThreadView({
           <span className="min-w-0 flex-1 truncate font-mono" title={thread.workspace}>
             {thread.workspace}
           </span>
-          <span className="font-mono text-xs text-muted">{thread.model}</span>
+          <ModelPicker
+            model={thread.model}
+            ownModel={thread.ownModel}
+            disabled={state.running}
+            switching={reloading}
+            onChoose={onModel}
+          />
           <ContextMeter
             lastStep={state.lastStep}
             session={state.usage}

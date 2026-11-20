@@ -50,7 +50,8 @@ Keys are never written to the settings file, and the app never shows them again.
 Everything else is under **Settings** (Ctrl+, or ⌘,): models and triage, providers and keys,
 limits, guardrails and approvals, MCP servers, sub-agents and skills, memory, trusted projects,
 appearance, and updates. Threads opened after a change use it; an open thread picks it up with
-**Reload** in its header.
+**Reload** in its header. To try another model in one thread only, use its header's model menu
+(below).
 
 ## Threads
 
@@ -65,6 +66,13 @@ In the prompt:
   (`/code-reviewer check src/`), or a specialist (`/agent explorer find the parser`).
 - **`@`** mentions a file in the workspace; its contents go to the model with your message.
 - **Esc** stops a running turn (or closes a menu).
+
+**Changing a thread's model.** Click the model's name in the thread's header. The menu lists the
+models your settings name and every model each provider reports (OpenRouter, OpenAI, Anthropic,
+Google, Ollama, vLLM, LM Studio); type to filter, or type `provider:model` to use one that is not
+listed. The thread switches between turns and keeps its conversation; other threads and your
+settings are unchanged. A thread on a model of its own shows a dot beside the name, and its menu
+offers **The settings' model** to go back.
 
 The agent's answer streams in with its thinking (folded) and a card for each tool call. Cards for
 edits show the diff; reads show the file, highlighted; commands show their output. The header shows

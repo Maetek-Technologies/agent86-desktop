@@ -61,6 +61,9 @@ struct Thread {
     /// The git worktrees isolated sub-agents of this thread left behind (agent86's `[worktree]`
     /// note), so their files can be opened as the workspace's can.
     worktrees: Arc<Mutex<Vec<PathBuf>>>,
+    /// The model chosen for this thread in its header (`provider:model`), instead of the
+    /// settings' default and triage. Kept across reloads.
+    model: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -109,6 +112,7 @@ impl ThreadManager {
                 workspace,
                 mention_max_bytes,
                 worktrees,
+                model: Mutex::new(None),
             },
         );
         Ok(Opened {
@@ -183,6 +187,23 @@ impl ThreadManager {
                     .unwrap_or_default(),
             );
             Ok(roots)
+        })
+    }
+
+    /// The model chosen for thread `id`, if one was.
+    pub fn model(&self, id: &str) -> Result<Option<String>, String> {
+        self.with(id, |thread| {
+            Ok(thread.model.lock().map(|m| m.clone()).unwrap_or_default())
+        })
+    }
+
+    /// Remember `model` as thread `id`'s choice (after its agent was rebuilt with it).
+    pub fn set_model(&self, id: &str, model: Option<String>) -> Result<(), String> {
+        self.with(id, |thread| {
+            if let Ok(mut chosen) = thread.model.lock() {
+                *chosen = model;
+            }
+            Ok(())
         })
     }
 

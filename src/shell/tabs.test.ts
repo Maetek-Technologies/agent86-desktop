@@ -10,6 +10,7 @@ function opened(threadId: string, history: OpenedThread["history"] = []): Opened
     model: "m",
     contextWindow: 1000,
     capabilities: { skills: [], specialists: [], tools: [] },
+    ownModel: false,
     sessionId: `s-${threadId}`,
     history,
     memoryNote: null,

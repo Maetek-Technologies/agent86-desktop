@@ -50,6 +50,7 @@ function opened(threadId: string, workspace: string, sessionId: string, history:
     model: "vllm:qwen",
     contextWindow: 32768,
     capabilities,
+    ownModel: false,
     sessionId,
     history,
     memoryNote: null,
@@ -252,6 +253,45 @@ test("asks for the folder of a session the app does not know", async () => {
   expect(calls.find((c) => c.cmd === "open_thread")?.args).toMatchObject({
     workspace: "C:\\code\\demo",
     sessionId: "s-nofolder",
+  });
+});
+
+test("the header's model menu switches this thread's model", async () => {
+  const calls = backend((cmd) => {
+    if (cmd === "list_models")
+      return {
+        configured: ["vllm:qwen"],
+        providers: [
+          {
+            provider: "vllm",
+            models: [
+              { reference: "vllm:qwen", label: null },
+              { reference: "vllm:small", label: null },
+            ],
+            problem: null,
+          },
+        ],
+      };
+    if (cmd === "set_thread_model")
+      return {
+        model: "vllm:small",
+        ownModel: true,
+        contextWindow: 8192,
+        capabilities,
+        project: null,
+        notes: [],
+      };
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Choose a workspace/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Model: vllm:qwen/ }));
+  fireEvent.click(await screen.findByRole("option", { name: "vllm:small" }));
+  expect(await screen.findByRole("button", { name: /Model: vllm:small/ })).toBeTruthy();
+  expect(await screen.findByText(/\[model\] vllm:small from now on/)).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "set_thread_model")?.args).toEqual({
+    threadId: "t1",
+    model: "vllm:small",
   });
 });
 

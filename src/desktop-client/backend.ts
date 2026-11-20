@@ -13,6 +13,7 @@ import type {
   MemoryKind,
   MemoryPage,
   ModelInfo,
+  ModelMenu,
   OpenedThread,
   ProjectContent,
   ProviderSettings,
@@ -180,6 +181,19 @@ export function installUpdate(onProgress: (progress: UpdateProgress) => void): P
 /** Restart the app; running turns stop. */
 export function restartApp(): Promise<void> {
   return invoke("restart_app");
+}
+
+/** The models a thread's menu offers: those the settings name, and each provider's own list. */
+export function listModels(): Promise<ModelMenu> {
+  return invoke<ModelMenu>("list_models");
+}
+
+/**
+ * Run a thread on `model` (`provider:model`) from now on, keeping its conversation; `""` goes back
+ * to the settings' model. Only between turns.
+ */
+export function setThreadModel(threadId: string, model: string): Promise<ReloadedThread> {
+  return invoke<ReloadedThread>("set_thread_model", { threadId, model });
 }
 
 /** Rebuild a thread with the current settings and project trust, keeping its conversation. */

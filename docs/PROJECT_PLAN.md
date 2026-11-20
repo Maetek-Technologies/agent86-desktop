@@ -240,6 +240,12 @@ agent86-desktop/
 
 ---
 
+**After 1.0.0.** A thread's header has a model menu (`ModelPicker`): the settings' models and each
+provider's live list (agent86-core's catalog, in `unstable.rs`, the CLI's `/model` source), filtered
+as you type, or any `provider:model`. `set_thread_model` rebuilds that thread on the model alone
+(no triage), keeping its conversation; the choice is kept across Reload, and an empty choice goes
+back to the settings' model.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives

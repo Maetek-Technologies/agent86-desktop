@@ -16,6 +16,7 @@ import {
   prompt,
   reloadThread,
   renameSession,
+  setThreadModel,
   type AppInfo,
   type ModelInfo,
   type SessionList,
@@ -479,6 +480,29 @@ function TabView({
     );
   }, [opened, key, local, dispatchTab]);
 
+  const chooseModel = useCallback(
+    (reference: string) => {
+      setReloading(true);
+      setThreadModel(opened.threadId, reference).then(
+        (reloaded) => {
+          dispatchTab({ type: "reloaded", key, reloaded });
+          local({
+            type: "local/notice",
+            text: reference
+              ? `[model] ${reloaded.model} from now on in this thread; the conversation carries on.`
+              : `[model] back to the settings' model, ${reloaded.model}.`,
+          });
+          setReloading(false);
+        },
+        (e: unknown) => {
+          local({ type: "local/warning", text: String(e) });
+          setReloading(false);
+        },
+      );
+    },
+    [opened, key, local, dispatchTab],
+  );
+
   const stop = useCallback(() => {
     local({ type: "local/cancelling" });
     cancelTurn(opened.threadId).catch((e: unknown) =>
@@ -509,6 +533,7 @@ function TabView({
       onSecrets={setSecretsOpen}
       onReload={reload}
       reloading={reloading}
+      onModel={chooseModel}
     />
   );
 }

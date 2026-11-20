@@ -5,4 +5,8 @@ import type { ProjectStatus } from "./ProjectStatus";
 /**
  * A thread rebuilt with the current settings and project trust, keeping its conversation.
  */
-export type ReloadedThread = { model: string, contextWindow: number, capabilities: Capabilities, project: ProjectStatus | null, notes: Array<string>, };
+export type ReloadedThread = { model: string, 
+/**
+ * The thread runs on a model chosen in its header rather than the settings'.
+ */
+ownModel: boolean, contextWindow: number, capabilities: Capabilities, project: ProjectStatus | null, notes: Array<string>, };

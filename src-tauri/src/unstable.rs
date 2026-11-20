@@ -16,6 +16,8 @@
 //! - A thread's secret vault: attached to the keyring with the CLI's per-project layout, so a
 //!   secret remembered in either is loaded by both, and read for the secrets panel.
 //! - Sub-agents' progress, reported through the harness's observer.
+//! - A provider's model list (the thread's model menu), from agent86's catalog, which knows each
+//!   provider's models endpoint and answer shape, as the CLI's `/model` does.
 //!
 //! The M1 stopgap that read the CLI's config.toml through agent86-core's loader is gone: the app
 //! has its own settings (settings.rs) and imports the CLI's file itself (cli_import.rs).
@@ -34,6 +36,51 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub use agent86_core::pricing::PriceTable;
+
+/// The models provider `section` offers, as `(id, label)` sorted by id, from its models endpoint.
+/// Blocking (a short HTTP request); call off the UI thread. Fails with why there is no list.
+pub fn model_catalog(
+    section: &ProviderSettings,
+    key: Option<&str>,
+) -> Result<Vec<(String, String)>, String> {
+    use agent86_core::provider::catalog;
+    use std::time::Duration;
+    let base = section
+        .base_url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty());
+    let mut entries = match section.kind {
+        ProviderKind::Anthropic => catalog::fetch_anthropic(key),
+        ProviderKind::Ollama => catalog::fetch_ollama(base.unwrap_or("http://localhost:11434")),
+        ProviderKind::Google => catalog::fetch_google(
+            base.unwrap_or(agent86_core::provider::google::DEFAULT_BASE_URL),
+            key,
+        )
+        .map(|models| models.into_iter().map(|m| (m.id, m.label)).collect()),
+        ProviderKind::Llamacpp => Err(catalog::CatalogUnavailable(
+            "llama.cpp has no model list; type the model's name.".to_owned(),
+        )),
+        ProviderKind::Lmstudio => {
+            let base = base.unwrap_or("http://localhost:1234/v1");
+            match catalog::fetch_lmstudio_models(base, key, Duration::from_secs(10)) {
+                Ok(models) => Ok(models
+                    .into_iter()
+                    .filter(|m| m.kind == "llm")
+                    .map(|m| (m.key, m.display_name))
+                    .collect()),
+                // An older LM Studio, or a proxy that passes only `/v1`: ids only.
+                Err(_) => catalog::fetch_openai_compatible(base, key),
+            }
+        }
+        ProviderKind::Openai | ProviderKind::Vllm => {
+            catalog::fetch_openai_compatible(base.unwrap_or("https://api.openai.com/v1"), key)
+        }
+    }
+    .map_err(|error| error.0)?;
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.dedup_by(|a, b| a.0 == b.0);
+    Ok(entries)
+}
 
 /// The keyring service agent86 keeps its keys under.
 pub const KEYRING_SERVICE: &str = agent86_core::secrets::SERVICE_NAME;

@@ -237,6 +237,9 @@ pub struct OpenedThread {
     #[ts(type = "number")]
     pub context_window: u64,
     pub capabilities: Capabilities,
+    /// The thread runs on a model chosen in its header rather than the settings' (always false
+    /// for a thread just opened).
+    pub own_model: bool,
     /// The agent86 session this thread saves to (new, or the one reopened).
     pub session_id: String,
     /// A reopened session's conversation; empty for a new one.
@@ -335,6 +338,7 @@ fn open_thread_blocking(
         model: setup.plan.model,
         context_window: setup.plan.context_window,
         capabilities: opened.capabilities,
+        own_model: false,
         session_id: opened.session_id,
         history: opened.history,
         memory_note,
@@ -377,6 +381,8 @@ fn prepare(app: &tauri::AppHandle, settings: &Settings, workspace: &Path) -> Res
 #[serde(rename_all = "camelCase")]
 pub struct ReloadedThread {
     pub model: String,
+    /// The thread runs on a model chosen in its header rather than the settings'.
+    pub own_model: bool,
     #[ts(type = "number")]
     pub context_window: u64,
     pub capabilities: Capabilities,
@@ -393,31 +399,161 @@ pub async fn reload_thread(
 ) -> Result<ReloadedThread, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let threads = app.state::<ThreadManager>();
-        let workspace = threads.workspace(&thread_id)?;
-        let settings = app.state::<SettingsStore>().require()?;
-        let setup = prepare(&app, &settings, &workspace)?;
-        // The conversation comes over from the old agent; memory keeps saving it.
-        let memory = app.state::<Sessions>().memory(&settings.memory).ok();
-        let mut builder = setup.plan.builder;
-        let capabilities = threads.reload(
-            &thread_id,
-            Box::new(move || {
-                if let Some(opened) = memory {
-                    builder = builder.memory(opened.memory);
-                }
-                Ok(builder)
-            }),
-        )?;
-        Ok(ReloadedThread {
-            model: setup.plan.model,
-            context_window: setup.plan.context_window,
-            capabilities,
-            project: setup.project,
-            notes: setup.plan.notes,
-        })
+        let chosen = threads.model(&thread_id)?;
+        rebuild(&app, &thread_id, chosen.as_deref())
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Run thread `thread_id` on `model` (`provider:model`) from now on, keeping its conversation:
+/// the model menu in its header. An empty `model` goes back to the settings' model (and triage).
+/// Only between turns; other threads and the settings keep theirs.
+#[tauri::command]
+pub async fn set_thread_model(
+    app: tauri::AppHandle,
+    thread_id: String,
+    model: String,
+) -> Result<ReloadedThread, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = Some(model.trim().to_owned()).filter(|model| !model.is_empty());
+        let reloaded = rebuild(&app, &thread_id, model.as_deref())?;
+        app.state::<ThreadManager>().set_model(&thread_id, model)?;
+        Ok(reloaded)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// The settings a thread runs with: the app's, or with `model` alone (no triage) when the thread
+/// has a model of its own.
+fn settings_for(settings: Settings, model: Option<&str>) -> Settings {
+    match model {
+        Some(model) => {
+            let mut settings = settings;
+            settings.model.default = model.to_owned();
+            settings.model.triage = None;
+            settings
+        }
+        None => settings,
+    }
+}
+
+/// Rebuild thread `thread_id` from the current settings and project trust, on `model` if given.
+fn rebuild(
+    app: &tauri::AppHandle,
+    thread_id: &str,
+    model: Option<&str>,
+) -> Result<ReloadedThread, String> {
+    let threads = app.state::<ThreadManager>();
+    let workspace = threads.workspace(thread_id)?;
+    let settings = settings_for(app.state::<SettingsStore>().require()?, model);
+    if let Some(model) = model {
+        // Say plainly what is wrong (no such provider, no key) before touching the thread.
+        agent_factory::model(&settings, model, &OsKeys)?;
+    }
+    let setup = prepare(app, &settings, &workspace)?;
+    // The conversation comes over from the old agent; memory keeps saving it.
+    let memory = app.state::<Sessions>().memory(&settings.memory).ok();
+    let mut builder = setup.plan.builder;
+    let capabilities = threads.reload(
+        thread_id,
+        Box::new(move || {
+            if let Some(opened) = memory {
+                builder = builder.memory(opened.memory);
+            }
+            Ok(builder)
+        }),
+    )?;
+    Ok(ReloadedThread {
+        model: setup.plan.model,
+        own_model: model.is_some(),
+        context_window: setup.plan.context_window,
+        capabilities,
+        project: setup.project,
+        notes: setup.plan.notes,
+    })
+}
+
+/// The models a thread's menu offers.
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMenu {
+    /// The models the settings name (default, triage), as `provider:model`.
+    pub configured: Vec<String>,
+    /// Each provider's own list, by provider name, in settings order.
+    pub providers: Vec<ProviderModels>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModels {
+    pub provider: String,
+    pub models: Vec<ModelChoice>,
+    /// Why the provider gave no list (unreachable, no key, no listing), if it gave none.
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelChoice {
+    /// `provider:model`.
+    pub reference: String,
+    /// The provider's display name when it differs from the id.
+    pub label: Option<String>,
+}
+
+/// The models to choose from: those the settings name, and what each provider says it offers
+/// (asked in parallel, a few seconds at most each).
+#[tauri::command]
+pub async fn list_models(app: tauri::AppHandle) -> Result<ModelMenu, String> {
+    let settings = app.state::<SettingsStore>().require()?;
+    let mut configured = vec![settings.model.default.trim().to_owned()];
+    if let Some(triage) = &settings.model.triage {
+        configured.extend([
+            triage.frontier.trim().to_owned(),
+            triage.cheap.trim().to_owned(),
+        ]);
+    }
+    configured.retain(|reference| !reference.is_empty());
+    configured.dedup();
+    let asks = settings.providers.iter().map(|(name, section)| {
+        let (name, section) = (name.clone(), section.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            let key = keys::resolve(&name, &section, &OsKeys);
+            let listed = crate::unstable::model_catalog(&section, key.as_deref());
+            (name, listed)
+        })
+    });
+    let mut providers = Vec::new();
+    for ask in asks.collect::<Vec<_>>() {
+        let (provider, listed) = ask.await.map_err(|error| error.to_string())?;
+        providers.push(match listed {
+            Ok(entries) => ProviderModels {
+                models: entries
+                    .into_iter()
+                    .map(|(id, label)| ModelChoice {
+                        reference: format!("{provider}:{id}"),
+                        label: (label != id && !label.trim().is_empty()).then_some(label),
+                    })
+                    .collect(),
+                provider,
+                problem: None,
+            },
+            Err(problem) => ProviderModels {
+                provider,
+                models: Vec::new(),
+                problem: Some(problem),
+            },
+        });
+    }
+    Ok(ModelMenu {
+        configured,
+        providers,
+    })
 }
 
 /// Recent saved sessions, newest first, from the memory database shared with the agent86 CLI.
@@ -628,6 +764,20 @@ mod tests {
         let info = describe_model(&SettingsStore::open(None));
         assert_eq!(info.reference, "");
         assert!(info.problem.unwrap().contains("Set up a model"));
+    }
+
+    #[test]
+    fn a_threads_own_model_replaces_the_default_and_triage() {
+        let mut settings = Settings::default();
+        settings.model.default = "vllm:a".into();
+        settings.model.triage = Some(crate::settings::Triage {
+            cheap: "vllm:c".into(),
+            frontier: "vllm:f".into(),
+        });
+        let own = settings_for(settings.clone(), Some("openrouter:x"));
+        assert_eq!(own.model.default, "openrouter:x");
+        assert!(own.model.triage.is_none());
+        assert_eq!(settings_for(settings.clone(), None), settings);
     }
 
     #[test]
