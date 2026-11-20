@@ -1,35 +1,38 @@
-import { useEffect, useRef } from "react";
-import type { OpenedThread } from "../desktop-client/backend.ts";
-import type { Answer } from "../desktop-client/events.ts";
+import { useEffect, useMemo, useRef } from "react";
+import { commandsFor } from "../desktop-client/commands.ts";
+import type { Answer, OpenedThread } from "../desktop-client/events.ts";
 import type { Entry, Question, SessionState } from "../desktop-client/session-state.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
 import { PermissionPanel } from "../tools/PermissionPanel.tsx";
 import { LimitPanel } from "./LimitPanel.tsx";
-import { PromptBox } from "./PromptBox.tsx";
+import { PromptInput } from "./PromptInput.tsx";
+import { ContextMeter, TurnSummaryLine } from "./Spend.tsx";
 import { ThreadContext } from "./ThreadContext.ts";
 import { ToolCard } from "./ToolCard.tsx";
 
 interface Props {
   thread: OpenedThread;
   state: SessionState;
-  onSend: (text: string) => void;
+  onSend: (text: string, mentions: string[]) => void;
   onStop: () => void;
   onAnswer: (qid: number, answer: Answer) => void;
+  findFiles: (query: string) => Promise<string[]>;
   onClose: () => void;
 }
 
-export function ThreadView({ thread, state, onSend, onStop, onAnswer, onClose }: Props) {
+export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles, onClose }: Props) {
   const bottom = useRef<HTMLDivElement>(null);
   const last = state.entries.at(-1);
   const lastLength = last && "text" in last ? last.text.length : 0;
   // agent86 asks one question at a time; the oldest open one is the one it waits on.
   const question = state.questions[0];
+  const commands = useMemo(() => commandsFor(thread.capabilities), [thread.capabilities]);
 
   // Follow the stream as it grows.
   useEffect(() => {
     bottom.current?.scrollIntoView?.({ block: "end" });
-  }, [state.entries.length, lastLength]);
+  }, [state.entries.length, lastLength, question]);
 
   return (
     <ThreadContext.Provider value={{ cwd: thread.workspace }}>
@@ -39,13 +42,11 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, onClose }:
             {thread.workspace}
           </span>
           <span className="font-mono text-xs text-muted">{thread.model}</span>
-          {state.usage && (
-            <span className="text-xs text-muted" title="Session tokens in / out">
-              {state.usage.inputTokens.toLocaleString()} /{" "}
-              {state.usage.outputTokens.toLocaleString()} tok
-              {state.usage.costUsd > 0 && ` · $${state.usage.costUsd.toFixed(4)}`}
-            </span>
-          )}
+          <ContextMeter
+            lastStep={state.lastStep}
+            session={state.usage}
+            contextWindow={thread.contextWindow}
+          />
           <button
             type="button"
             className="rounded px-2 py-0.5 text-xs text-muted hover:bg-panel-2 hover:text-text"
@@ -56,6 +57,7 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, onClose }:
         </header>
         <main className="flex-1 overflow-y-auto px-4 py-3" aria-live="polite">
           <div className="mx-auto max-w-4xl">
+            {state.entries.length === 0 && <Welcome thread={thread} />}
             {state.entries.map((entry) => (
               <EntryView key={entry.id} entry={entry} />
             ))}
@@ -72,9 +74,12 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, onClose }:
             </div>
           </div>
         )}
-        <PromptBox
+        <PromptInput
+          workspace={thread.workspace}
           running={state.running}
           cancelling={state.cancelling}
+          commands={commands}
+          findFiles={findFiles}
           onSend={onSend}
           onStop={onStop}
           questionOpen={question !== undefined}
@@ -91,6 +96,24 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, onClose }:
         )}
       </div>
     </ThreadContext.Provider>
+  );
+}
+
+function Welcome({ thread }: { thread: OpenedThread }) {
+  const { skills, specialists } = thread.capabilities;
+  return (
+    <div className="my-6 text-sm text-muted">
+      <p>
+        Ask about this folder, or type <span className="font-mono text-text">/</span> for commands
+        and <span className="font-mono text-text">@</span> to mention a file.
+      </p>
+      {(skills.length > 0 || specialists.length > 0) && (
+        <p className="mt-1">
+          {skills.length} skill{skills.length === 1 ? "" : "s"} and {specialists.length} specialist
+          {specialists.length === 1 ? "" : "s"} available.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -151,5 +174,24 @@ function EntryView({ entry }: { entry: Entry }) {
       );
     case "tool":
       return <ToolCard entry={entry} />;
+    case "list":
+      return (
+        <div className="my-3 rounded-md border border-border bg-panel p-3 text-sm">
+          <div className="mb-2 font-semibold">{entry.title}</div>
+          {entry.items.length === 0 ? (
+            <div className="text-muted">None.</div>
+          ) : (
+            <ul className="flex flex-wrap gap-2">
+              {entry.items.map((item) => (
+                <li key={item} className="rounded bg-panel-2 px-2 py-0.5 font-mono text-xs">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
+    case "turnSummary":
+      return <TurnSummaryLine turn={entry.turn} cancelled={entry.cancelled} />;
   }
 }

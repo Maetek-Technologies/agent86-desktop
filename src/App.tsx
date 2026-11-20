@@ -4,6 +4,7 @@ import {
   appInfo,
   cancelTurn,
   closeThread,
+  findFiles,
   modelInfo,
   openThread,
   pickWorkspace,
@@ -12,6 +13,7 @@ import {
   type ModelInfo,
   type OpenedThread,
 } from "./desktop-client/backend.ts";
+import { listItems, parseCommand } from "./desktop-client/commands.ts";
 import type { Answer } from "./desktop-client/events.ts";
 import { initialState, reduce } from "./desktop-client/session-state.ts";
 import { ThreadView } from "./thread/ThreadView.tsx";
@@ -49,13 +51,30 @@ export function App() {
   };
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, mentions: string[]) => {
       if (!thread) return;
-      dispatch({ type: "local/prompt", text });
-      prompt(thread.threadId, text).catch((e: unknown) =>
-        dispatch({ type: "local/error", text: String(e) }),
-      );
+      const command = parseCommand(text, thread.capabilities, mentions);
+      switch (command.type) {
+        case "list": {
+          const items = listItems(command.list, thread.capabilities);
+          dispatch({ type: "local/list", title: `/${command.list} (${items.length})`, items });
+          return;
+        }
+        case "error":
+          dispatch({ type: "local/warning", text: command.message });
+          return;
+        case "turn":
+          dispatch({ type: "local/prompt", text: command.display });
+          prompt(thread.threadId, command.turn).catch((e: unknown) =>
+            dispatch({ type: "local/error", text: String(e) }),
+          );
+      }
     },
+    [thread],
+  );
+
+  const searchFiles = useCallback(
+    (query: string) => (thread ? findFiles(thread.threadId, query) : Promise.resolve([])),
     [thread],
   );
 
@@ -91,6 +110,7 @@ export function App() {
         onSend={send}
         onStop={stop}
         onAnswer={reply}
+        findFiles={searchFiles}
         onClose={close}
       />
     );

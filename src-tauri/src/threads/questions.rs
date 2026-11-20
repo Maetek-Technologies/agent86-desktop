@@ -13,12 +13,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
+use ts_rs::TS;
 
 /// How often a waiting question checks whether the turn was cancelled.
 const CANCEL_POLL: Duration = Duration::from_millis(50);
 
 /// The user's answer to one question, as the UI sends it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[ts(export)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -38,7 +40,8 @@ pub enum Answer {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub enum ApprovalChoice {
     AllowOnce,
@@ -201,7 +204,8 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// What an approval shows: agent86-core's [`ApprovalPreview`], owned and serializable.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalInfo {
     /// The arguments, as JSON, capped by agent86.
@@ -220,17 +224,20 @@ pub struct ApprovalInfo {
     pub asker: Option<AskerInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChangeInfo {
     pub path: String,
     /// `None` for a new file.
     pub old_text: Option<String>,
     pub new_text: String,
+    #[ts(type = "number | null")]
     pub line: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct AskerInfo {
     pub agent: String,
@@ -282,10 +289,12 @@ impl From<&ApprovalPreview> for ApprovalInfo {
 }
 
 /// A limit the turn reached, and the raises on offer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitInfo {
     /// `steps`, `agent_steps`, or `output`.
+    #[ts(type = "\"steps\" | \"agent_steps\" | \"output\"")]
     pub kind: String,
     /// What happened, in agent86's words.
     pub headline: String,

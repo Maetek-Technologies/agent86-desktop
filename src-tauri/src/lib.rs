@@ -1,6 +1,7 @@
 mod cli_config;
 mod commands;
 mod threads;
+mod workspace_files;
 
 pub fn run() {
     tauri::Builder::default()
@@ -12,6 +13,7 @@ pub fn run() {
             commands::pick_workspace,
             commands::open_thread,
             commands::prompt,
+            commands::find_files,
             commands::cancel_turn,
             commands::answer,
             commands::close_thread,

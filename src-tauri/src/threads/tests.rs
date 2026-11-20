@@ -196,7 +196,7 @@ fn a_text_turn_streams_and_ends() {
         Builtins::ReadOnly,
     )
     .unwrap();
-    h.thread.prompt("say hello".into()).unwrap();
+    h.thread.prompt("say hello").unwrap();
     let events = h.until_end();
     assert_eq!(agent_text(&events), "hello there");
     match events.last().unwrap() {
@@ -226,7 +226,7 @@ fn a_tool_call_is_announced_then_its_result() {
         Builtins::ReadOnly,
     )
     .unwrap();
-    h.thread.prompt("what is here?".into()).unwrap();
+    h.thread.prompt("what is here?").unwrap();
     let events = h.until_end();
 
     let call = events
@@ -257,9 +257,9 @@ fn cancel_stops_a_running_turn_and_a_second_prompt_is_refused_meanwhile() {
         Builtins::ReadOnly,
     )
     .unwrap();
-    h.thread.prompt("take forever".into()).unwrap();
+    h.thread.prompt("take forever").unwrap();
     assert!(h.thread.is_busy());
-    assert!(h.thread.prompt("again".into()).is_err());
+    assert!(h.thread.prompt("again").is_err());
 
     std::thread::sleep(Duration::from_millis(200));
     h.thread.cancel();
@@ -276,7 +276,7 @@ fn cancel_stops_a_running_turn_and_a_second_prompt_is_refused_meanwhile() {
     );
 
     // The thread is usable again, and the cancel does not leak into the next turn.
-    h.thread.prompt("now answer".into()).unwrap();
+    h.thread.prompt("now answer").unwrap();
     let events = h.until_end();
     assert_eq!(agent_text(&events), "after");
     assert!(matches!(
@@ -292,7 +292,7 @@ fn cancel_stops_a_running_turn_and_a_second_prompt_is_refused_meanwhile() {
 fn a_cancel_sent_right_after_the_prompt_is_not_lost() {
     let dir = tempfile::tempdir().unwrap();
     let h = start(vec![Reply::Hang], dir.path(), Builtins::ReadOnly).unwrap();
-    h.thread.prompt("go".into()).unwrap();
+    h.thread.prompt("go").unwrap();
     h.thread.cancel();
     let events = h.until_end();
     assert!(matches!(
@@ -308,7 +308,7 @@ fn a_cancel_sent_right_after_the_prompt_is_not_lost() {
 fn an_empty_prompt_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let h = start(vec![], dir.path(), Builtins::ReadOnly).unwrap();
-    assert!(h.thread.prompt("   ".into()).is_err());
+    assert!(h.thread.prompt("   ").is_err());
     assert!(!h.thread.is_busy());
 }
 
@@ -354,7 +354,7 @@ fn real_model_smoke() {
     .unwrap();
     let h = Harness { thread, events };
     h.thread
-        .prompt("Use list_dir to list the files in the workspace, then name them in one short sentence.".into())
+        .prompt("Use list_dir to list the files in the workspace, then name them in one short sentence.")
         .unwrap();
     let events = h.until_end();
     for event in &events {
@@ -378,7 +378,7 @@ fn an_approved_write_runs_and_the_approval_shows_the_change() {
         Builtins::Files,
     )
     .unwrap();
-    h.thread.prompt("write ok.txt".into()).unwrap();
+    h.thread.prompt("write ok.txt").unwrap();
     let (qid, question) = h.until_question();
     match &question {
         DesktopEvent::ApprovalRequest { tool, preview, .. } => {
@@ -412,7 +412,7 @@ fn a_rejected_write_does_not_happen() {
         Builtins::Files,
     )
     .unwrap();
-    h.thread.prompt("write no.txt".into()).unwrap();
+    h.thread.prompt("write no.txt").unwrap();
     let (qid, _) = h.until_question();
     h.approve(qid, ApprovalChoice::Reject);
     let events = h.until_end();
@@ -435,7 +435,7 @@ fn allow_always_asks_once_per_tool_for_the_thread() {
         Builtins::Files,
     )
     .unwrap();
-    h.thread.prompt("write two files".into()).unwrap();
+    h.thread.prompt("write two files").unwrap();
     let (qid, _) = h.until_question();
     h.approve(qid, ApprovalChoice::AllowAlways);
     let events = h.until_end();
@@ -457,7 +457,7 @@ fn cancel_while_an_approval_waits_declines_it_and_ends_the_turn() {
         Builtins::Files,
     )
     .unwrap();
-    h.thread.prompt("write late.txt".into()).unwrap();
+    h.thread.prompt("write late.txt").unwrap();
     let (qid, _) = h.until_question();
     h.thread.cancel();
     let events = h.until_end();
@@ -498,7 +498,7 @@ fn a_step_limit_can_be_raised_and_the_turn_goes_on() {
         |builder| builder.max_steps(1),
     )
     .unwrap();
-    h.thread.prompt("look around".into()).unwrap();
+    h.thread.prompt("look around").unwrap();
     let (qid, question) = h.until_question();
     let offers = match &question {
         DesktopEvent::LimitRequest { limit, .. } => {
@@ -536,7 +536,7 @@ fn a_secret_reaches_the_agent_but_never_comes_back_to_the_ui() {
         Builtins::ReadOnly,
     )
     .unwrap();
-    h.thread.prompt("you need a token".into()).unwrap();
+    h.thread.prompt("you need a token").unwrap();
     let (qid, question) = h.until_question();
     match &question {
         DesktopEvent::SecretRequest { name, reason, .. } => {
@@ -560,5 +560,54 @@ fn a_secret_reaches_the_agent_but_never_comes_back_to_the_ui() {
     for event in &events {
         let json = serde_json::to_string(event).unwrap();
         assert!(!json.contains(VALUE), "the value leaked into {json}");
+    }
+}
+
+#[test]
+fn capabilities_list_skills_and_tools_and_a_skill_runs_directly() {
+    let dir = tempfile::tempdir().unwrap();
+    let skills = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(skills.path().join("greet")).unwrap();
+    std::fs::write(
+        skills.path().join("greet").join("SKILL.md"),
+        "---\nname: greet\ndescription: Say hello nicely.\n---\nGreet the user warmly.\n",
+    )
+    .unwrap();
+    let skills_dir = skills.path().to_owned();
+    let provider: Arc<dyn Provider> = Scripted::new(vec![Reply::Text("Hello, friend!")]);
+    let workspace = dir.path().to_owned();
+    let (tx, events) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let thread = ThreadHandle::spawn(
+        Box::new(move || {
+            Ok(Agent::builder()
+                .provider(provider)
+                .workspace(workspace)
+                .builtins(Builtins::ReadOnly)
+                .skills_dir(skills_dir))
+        }),
+        Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
+        }),
+    )
+    .unwrap();
+    let caps = thread.capabilities().clone();
+    assert_eq!(caps.skills, vec!["greet"]);
+    assert!(caps.tools.iter().any(|t| t == "read_file"));
+    assert!(caps.tools.iter().any(|t| t == "use_skill"));
+
+    let h = Harness { thread, events };
+    h.thread
+        .prompt(agent86_core::sdk::Turn::skill("greet", "say hi"))
+        .unwrap();
+    let events = h.until_end();
+    assert_eq!(agent_text(&events), "Hello, friend!");
+    // An unknown skill fails the turn with agent86's message, and the thread goes on.
+    h.thread
+        .prompt(agent86_core::sdk::Turn::skill("nope", "x"))
+        .unwrap();
+    match h.until_end().last().unwrap() {
+        DesktopEvent::TurnFailed { error } => assert!(error.contains("nope"), "{error}"),
+        other => panic!("expected a failed turn, got {other:?}"),
     }
 }

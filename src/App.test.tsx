@@ -22,6 +22,18 @@ const model = {
   problem: null,
 };
 
+const opened = {
+  threadId: "t1",
+  workspace: "C:\\code\\demo",
+  model: "vllm:qwen",
+  contextWindow: 32768,
+  capabilities: {
+    skills: ["code-reviewer"],
+    specialists: ["explorer"],
+    tools: ["read_file", "write_file"],
+  },
+};
+
 test("shows the model and the core version, and offers a workspace", async () => {
   mockIPC((cmd) => {
     if (cmd === "app_info") return info;
@@ -54,8 +66,7 @@ test("opens a thread in the picked folder and sends a prompt", async () => {
     if (cmd === "app_info") return info;
     if (cmd === "model_info") return model;
     if (cmd === "pick_workspace") return "C:\\code\\demo";
-    if (cmd === "open_thread")
-      return { threadId: "t1", workspace: "C:\\code\\demo", model: "vllm:qwen" };
+    if (cmd === "open_thread") return opened;
     if (cmd === "prompt") return null;
     throw new Error(`unexpected command ${cmd}`);
   });
@@ -69,10 +80,31 @@ test("opens a thread in the picked folder and sends a prompt", async () => {
   expect(await screen.findByText("what is here?")).toBeTruthy();
   expect(calls.find((c) => c.cmd === "prompt")?.args).toMatchObject({
     threadId: "t1",
-    text: "what is here?",
+    turn: { kind: "goal", text: "what is here?", mentions: [] },
   });
   // The turn is running: Stop replaces Send.
   expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+});
+
+test("shows /tools as a list without starting a turn", async () => {
+  const calls: string[] = [];
+  mockIPC((cmd) => {
+    calls.push(cmd);
+    if (cmd === "app_info") return info;
+    if (cmd === "model_info") return model;
+    if (cmd === "pick_workspace") return "C:\\code\\demo";
+    if (cmd === "open_thread") return opened;
+    throw new Error(`unexpected command ${cmd}`);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Choose a workspace/ }));
+  const box = await screen.findByLabelText("Prompt");
+  fireEvent.change(box, { target: { value: "/tools" } });
+  fireEvent.keyDown(box, { key: "Escape" });
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(await screen.findByText("/tools (2)")).toBeTruthy();
+  expect(screen.getByText("write_file")).toBeTruthy();
+  expect(calls).not.toContain("prompt");
 });
 
 test("says so when the core cannot be reached", async () => {

@@ -1,16 +1,18 @@
 //! What a thread streams to the UI: owned, serializable versions of agent86-core's borrowed
-//! [`TurnEvent`]s, plus the turn's end. The TypeScript side mirrors this in
-//! `src/desktop-client/events.ts`.
+//! [`TurnEvent`]s, plus the turn's end. `cargo test` writes their TypeScript types to
+//! `src/desktop-client/generated` (ts-rs).
 
 use super::questions::{ApprovalInfo, LimitInfo};
 use agent86_core::sdk::{TurnEvent, TurnSummary, Usage};
 use serde::Serialize;
 use serde_json::Value;
+use ts_rs::TS;
 
 /// The most tool output sent to the UI for one call. The model's own copy is not affected.
 pub const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -27,6 +29,7 @@ pub enum DesktopEvent {
     ToolCall {
         id: String,
         name: String,
+        #[ts(type = "Record<string, unknown>")]
         arguments: Value,
         /// agent86's `[tool] name(...)` line, without the prefix.
         title: String,
@@ -52,22 +55,32 @@ pub enum DesktopEvent {
     },
     /// A side-effecting call waits for the user's approval. Answer with `answer` and this `qid`.
     ApprovalRequest {
+        #[ts(type = "number")]
         qid: u64,
         tool: String,
         preview: ApprovalInfo,
     },
     /// The turn reached a limit; the user may raise it to one of the offers or stop.
-    LimitRequest { qid: u64, limit: LimitInfo },
+    LimitRequest {
+        #[ts(type = "number")]
+        qid: u64,
+        limit: LimitInfo,
+    },
     /// The model asks for a secret through `request_secret`. Only its name and reason are sent;
     /// the value goes the other way, once.
     SecretRequest {
+        #[ts(type = "number")]
         qid: u64,
         name: String,
         reason: String,
         replacing: bool,
     },
     /// Question `qid` is over: answered, or dropped because the turn was cancelled.
-    QuestionClosed { qid: u64, answered: bool },
+    QuestionClosed {
+        #[ts(type = "number")]
+        qid: u64,
+        answered: bool,
+    },
     /// The turn is over and the thread takes a new prompt.
     TurnEnded {
         stop_reason: StopReason,
@@ -80,20 +93,26 @@ pub enum DesktopEvent {
     TurnFailed { error: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
     EndTurn,
     Cancelled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageInfo {
+    #[ts(type = "number")]
     pub input_tokens: u64,
+    #[ts(type = "number")]
     pub output_tokens: u64,
     pub cost_usd: f64,
+    #[ts(type = "number")]
     pub cache_read_tokens: u64,
+    #[ts(type = "number")]
     pub cache_creation_tokens: u64,
 }
 
@@ -109,13 +128,18 @@ impl From<&Usage> for UsageInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnInfo {
+    #[ts(type = "number")]
     pub input_tokens: u64,
+    #[ts(type = "number")]
     pub output_tokens: u64,
     pub cost_usd: f64,
+    #[ts(type = "number")]
     pub steps: u64,
+    #[ts(type = "number")]
     pub tool_calls: u64,
     pub duration_s: f64,
 }

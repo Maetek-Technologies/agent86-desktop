@@ -2,6 +2,8 @@
 //! Commands that touch the disk or the network are `async`, so they never run on the UI thread.
 
 use crate::cli_config;
+use crate::threads::actor::Capabilities;
+use crate::threads::manager::TurnRequest;
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
 use agent86_core::sdk::{Agent, ApprovalMode, Builtins, Memory};
@@ -12,12 +14,14 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
+use ts_rs::TS;
 
 /// The agent86-core version this build embeds. It matches the exact pin in Cargo.toml; the test
 /// below fails if the two drift apart.
 pub const AGENT86_CORE_VERSION: &str = "1.1.0";
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
     pub app_version: String,
@@ -43,11 +47,13 @@ fn build_info(app_version: String) -> AppInfo {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     /// `provider:model`.
     pub reference: String,
+    #[ts(type = "number")]
     pub context_window: u64,
     /// The config files the model came from.
     pub source: String,
@@ -86,13 +92,18 @@ pub async fn pick_workspace(app: tauri::AppHandle) -> Result<Option<String>, Str
     Ok(Some(path.display().to_string()))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenedThread {
     pub thread_id: String,
     /// The workspace as resolved (absolute, symlinks followed).
     pub workspace: String,
     pub model: String,
+    /// Tokens of context the model holds, for the context meter.
+    #[ts(type = "number")]
+    pub context_window: u64,
+    pub capabilities: Capabilities,
 }
 
 /// Start a thread in `workspace`. Its events stream on `on_event` for the thread's life.
@@ -106,13 +117,16 @@ pub async fn open_thread(
     let config = cli_config::load()?;
     let setup = cli_config::model_setup(&config)?;
     let model = setup.reference.clone();
+    let context_window = setup.context_window;
     let limits = config.limits.clone();
     let guardrails = config.guardrails.clone();
+    let skill_dirs = cli_config::user_skill_dirs(&config);
+    let subagents = cli_config::subagents(&config);
     let agent_workspace = workspace.clone();
 
-    let thread_id = threads.open(
+    let (thread_id, capabilities) = threads.open(
         Box::new(move || {
-            Ok(Agent::builder()
+            let mut builder = Agent::builder()
                 .provider(setup.provider)
                 .workspace(agent_workspace)
                 .builtins(Builtins::All)
@@ -124,27 +138,49 @@ pub async fn open_thread(
                 .max_steps(limits.max_steps)
                 .max_cost_usd(limits.max_cost_usd)
                 .max_wall_clock_s(limits.max_wall_clock_s)
-                .tool_timeout(Duration::from_secs(limits.tool_timeout_s)))
+                .tool_timeout(Duration::from_secs(limits.tool_timeout_s));
+            for dir in skill_dirs {
+                builder = builder.skills_dir(dir);
+            }
+            if let Some(subagents) = subagents {
+                builder = builder.subagents(subagents);
+            }
+            Ok(builder)
         }),
         Arc::new(move |event| {
             // A send fails only when the page has gone; the thread goes on regardless.
             let _ = on_event.send(event);
         }),
+        workspace.clone(),
+        config.tools.mention_max_bytes,
     )?;
     Ok(OpenedThread {
         thread_id,
         workspace: workspace.display().to_string(),
         model,
+        context_window,
+        capabilities,
     })
 }
 
+/// Start a turn: a message (with its `@` mentions inlined), a skill, or a specialist.
 #[tauri::command]
 pub fn prompt(
     threads: State<'_, ThreadManager>,
     thread_id: String,
-    text: String,
+    turn: TurnRequest,
 ) -> Result<(), String> {
-    threads.prompt(&thread_id, text)
+    threads.prompt(&thread_id, turn)
+}
+
+/// Workspace files matching `query`, for the `@` menu.
+#[tauri::command]
+pub async fn find_files(
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+    query: String,
+) -> Result<Vec<String>, String> {
+    threads.find_files(&thread_id, &query)
 }
 
 #[tauri::command]

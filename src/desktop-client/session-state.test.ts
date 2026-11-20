@@ -114,6 +114,31 @@ describe("session state", () => {
     expect(state.entries.at(-1)).toMatchObject({ text: "Done" });
   });
 
+  it("adds a summary line for a finished turn and keeps the last step's usage", () => {
+    const turn = {
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 0,
+      steps: 2,
+      toolCalls: 1,
+      durationS: 1.5,
+    };
+    const state = fold(
+      { type: "local/prompt", text: "go" },
+      { type: "usage", step: usage, session: usage },
+      { type: "turnEnded", stopReason: "end_turn", answer: "", turn, usage },
+    );
+    expect(state.entries.at(-1)).toEqual({ kind: "turnSummary", id: 2, turn, cancelled: false });
+    expect(state.lastStep).toEqual(usage);
+  });
+
+  it("shows a list the app made itself", () => {
+    const state = fold({ type: "local/list", title: "/skills (1)", items: ["greet"] });
+    expect(state.entries).toEqual([
+      { kind: "list", id: 1, title: "/skills (1)", items: ["greet"] },
+    ]);
+  });
+
   it("ignores cancelling when no turn runs", () => {
     expect(fold({ type: "local/cancelling" }).cancelling).toBe(false);
   });

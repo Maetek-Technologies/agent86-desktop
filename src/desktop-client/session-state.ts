@@ -58,7 +58,31 @@ export interface ToolEntry {
   approvalQid?: number;
 }
 
-export type Entry = UserEntry | AgentEntry | ThoughtEntry | NoticeEntry | ErrorEntry | ToolEntry;
+/** A list the app shows itself (`/tools`, `/skills`, `/agents`). */
+export interface ListEntry {
+  kind: "list";
+  id: number;
+  title: string;
+  items: string[];
+}
+
+/** What a finished turn used: steps, tool calls, tokens, cost, time. */
+export interface TurnSummaryEntry {
+  kind: "turnSummary";
+  id: number;
+  turn: TurnInfo;
+  cancelled: boolean;
+}
+
+export type Entry =
+  | UserEntry
+  | AgentEntry
+  | ThoughtEntry
+  | NoticeEntry
+  | ErrorEntry
+  | ToolEntry
+  | ListEntry
+  | TurnSummaryEntry;
 
 /** A question the running turn waits on. Rust closes it with `questionClosed`. */
 export type Question =
@@ -74,6 +98,8 @@ export interface SessionState {
   cancelling: boolean;
   /** The session's usage so far. */
   usage: UsageInfo | null;
+  /** The last model call's usage: its input tokens are how full the context is. */
+  lastStep: UsageInfo | null;
   lastTurn: TurnInfo | null;
   /** Open questions, oldest first. agent86 asks one at a time, but the list keeps that honest. */
   questions: Question[];
@@ -86,6 +112,7 @@ export function initialState(): SessionState {
     running: false,
     cancelling: false,
     usage: null,
+    lastStep: null,
     lastTurn: null,
     questions: [],
     nextId: 1,
@@ -99,7 +126,8 @@ export type LocalAction =
   | { type: "local/error"; text: string }
   /** A problem that does not end the turn, such as an answer Rust refused. */
   | { type: "local/warning"; text: string }
-  | { type: "local/reset" };
+  | { type: "local/reset" }
+  | { type: "local/list"; title: string; items: string[] };
 
 export function reduce(state: SessionState, action: DesktopEvent | LocalAction): SessionState {
   switch (action.type) {
@@ -119,6 +147,8 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         id,
         text: action.text,
       }));
+    case "local/list":
+      return push(state, (id) => ({ kind: "list", id, title: action.title, items: action.items }));
     case "local/warning":
       return push(state, (id) => ({ kind: "error", id, text: action.text }));
     case "agentText":
@@ -185,16 +215,26 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
     case "questionClosed":
       return closeQuestion(state, action.qid);
     case "usage":
-      return { ...state, usage: action.session };
-    case "turnEnded":
+      return { ...state, usage: action.session, lastStep: action.step };
+    case "turnEnded": {
+      const turn = action.turn;
+      const ended = turn
+        ? push(state, (id) => ({
+            kind: "turnSummary",
+            id,
+            turn,
+            cancelled: action.stopReason === "cancelled",
+          }))
+        : state;
       return {
-        ...settleTools(state),
+        ...settleTools(ended),
         running: false,
         cancelling: false,
         usage: action.usage,
         lastTurn: action.turn,
         questions: [],
       };
+    }
     case "turnFailed":
       return push(
         { ...settleTools(state), running: false, cancelling: false, questions: [] },

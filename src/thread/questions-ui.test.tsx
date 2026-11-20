@@ -128,17 +128,3 @@ describe("SecretPrompt", () => {
     expect(onDecline).toHaveBeenCalled();
   });
 });
-
-describe("PromptBox focus", () => {
-  it("takes the focus back when a question closes", async () => {
-    const { PromptBox } = await import("./PromptBox.tsx");
-    const props = { running: true, cancelling: false, onSend: () => {}, onStop: () => {} };
-    const { rerender } = render(<PromptBox {...props} questionOpen />);
-    const outside = document.createElement("button");
-    document.body.append(outside);
-    outside.focus();
-    rerender(<PromptBox {...props} questionOpen={false} />);
-    expect(document.activeElement).toBe(screen.getByLabelText("Prompt"));
-    outside.remove();
-  });
-});

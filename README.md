@@ -5,11 +5,11 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M2.** One thread runs real turns: streamed answers, thinking, tool cards, cancel,
-> and approvals. Writes and commands wait for your approval (with a diff for file changes);
-> limits can be raised mid-turn, and the model can ask for a secret through a masked prompt. The
-> model and its key come from your agent86 CLI config (`~/.agent86/config.toml` and the OS
-> keyring) until the app has settings of its own (M5). The plan and milestones are in
+> **Status: M3.** One thread runs real turns with streamed answers, thinking, tool cards with
+> diffs, approvals, limit raises, secret prompts, `/` commands (skills, specialists, and the
+> `/tools`, `/skills`, `/agents` lists), `@` file mentions, prompt history, and a context meter.
+> The model, its key, skills, and specialists come from your agent86 CLI setup (`~/.agent86`)
+> until the app has settings of its own (M5). The plan and milestones are in
 > [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Prerequisites
@@ -41,11 +41,11 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 
 ## Layout
 
-| Path         | What it is                                                                   |
-| ------------ | ---------------------------------------------------------------------------- |
-| `src/`       | The React app; `desktop-client/` is the only code that calls into Rust       |
-| `src-tauri/` | The Tauri app: commands, and (from M1) the thread actors around agent86-core |
-| `docs/`      | The project plan                                                             |
+| Path         | What it is                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`       | The React app; `desktop-client/` is the only code that calls into Rust; `desktop-client/generated/` holds the IPC types `cargo test` writes from Rust (ts-rs) |
+| `src-tauri/` | The Tauri app: commands, and (from M1) the thread actors around agent86-core                                                                                  |
+| `docs/`      | The project plan                                                                                                                                              |
 
 ## License
 

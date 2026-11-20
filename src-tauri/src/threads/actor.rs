@@ -13,10 +13,12 @@
 
 use super::events::{DesktopEvent, StopReason, TurnInfo, UsageInfo};
 use super::questions::{Answer, Questions};
-use agent86_core::sdk::{AgentBuilder, CancelToken};
+use agent86_core::sdk::{AgentBuilder, CancelToken, Turn};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
+use ts_rs::TS;
 
 /// Where a thread's events go: the UI's channel in the app, a collector in tests.
 pub type EventSink = Arc<dyn Fn(DesktopEvent) + Send + Sync>;
@@ -28,7 +30,21 @@ pub type MakeBuilder = Box<dyn FnOnce() -> Result<AgentBuilder, String> + Send>;
 const CANCEL_WATCH_INTERVAL: Duration = Duration::from_millis(20);
 
 enum Command {
-    Prompt(String),
+    Prompt(Turn),
+}
+
+/// What a thread's agent offers, as built: for the `/` menu and the `/tools`, `/skills`, and
+/// `/agents` lists.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Capabilities {
+    /// Skills, run with `/<name> <task>`.
+    pub skills: Vec<String>,
+    /// Specialist sub-agents, run with `/agent <name> <task>`.
+    pub specialists: Vec<String>,
+    /// The tools the model is offered.
+    pub tools: Vec<String>,
 }
 
 /// State the handle and the actor share.
@@ -44,6 +60,7 @@ pub struct ThreadHandle {
     cancel: CancelToken,
     shared: Arc<Shared>,
     questions: Arc<Questions>,
+    capabilities: Capabilities,
 }
 
 impl ThreadHandle {
@@ -51,7 +68,7 @@ impl ThreadHandle {
     /// error (a bad workspace, an MCP server that would not start).
     pub fn spawn(make: MakeBuilder, sink: EventSink) -> Result<Self, String> {
         let (commands, inbox) = mpsc::channel::<Command>();
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<CancelToken, String>>();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(CancelToken, Capabilities), String>>();
         let shared = Arc::new(Shared {
             busy: AtomicBool::new(false),
             cancel_requested: Arc::new(AtomicBool::new(false)),
@@ -94,16 +111,21 @@ impl ThreadHandle {
                     }
                 };
                 let cancel = agent.cancel_handle();
-                if ready_tx.send(Ok(cancel.clone())).is_err() {
+                let capabilities = Capabilities {
+                    skills: agent.skills(),
+                    specialists: agent.specialists(),
+                    tools: agent.tool_names(),
+                };
+                if ready_tx.send(Ok((cancel.clone(), capabilities))).is_err() {
                     return;
                 }
 
                 while let Ok(command) = inbox.recv() {
                     match command {
-                        Command::Prompt(text) => {
+                        Command::Prompt(turn) => {
                             let events = sink.clone();
                             let result = runtime.block_on(async {
-                                let turn = agent.run_with_events(text.as_str(), |event| {
+                                let turn = agent.run_with_events(turn, |event| {
                                     events(DesktopEvent::from_turn_event(&event))
                                 });
                                 let watch = async {
@@ -156,7 +178,7 @@ impl ThreadHandle {
             })
             .map_err(|error| format!("could not start a thread: {error}"))?;
 
-        let cancel = ready_rx
+        let (cancel, capabilities) = ready_rx
             .recv()
             .map_err(|_| "the thread stopped while starting".to_owned())??;
         Ok(Self {
@@ -164,12 +186,23 @@ impl ThreadHandle {
             cancel,
             shared,
             questions,
+            capabilities,
         })
     }
 
+    pub fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
     /// Start a turn. Refused while one is running: agent86 runs one turn at a time per agent.
-    pub fn prompt(&self, text: String) -> Result<(), String> {
-        if text.trim().is_empty() {
+    pub fn prompt(&self, turn: impl Into<Turn>) -> Result<(), String> {
+        let turn = turn.into();
+        let empty = match &turn {
+            Turn::Goal(text) => text.trim().is_empty(),
+            Turn::Skill { name, .. } => name.trim().is_empty(),
+            Turn::Specialist { name, task, .. } => name.trim().is_empty() || task.trim().is_empty(),
+        };
+        if empty {
             return Err("The prompt is empty.".into());
         }
         if self.shared.busy.swap(true, Ordering::SeqCst) {
@@ -177,7 +210,7 @@ impl ThreadHandle {
         }
         self.shared.cancel_requested.store(false, Ordering::SeqCst);
         self.cancel.clear();
-        self.commands.send(Command::Prompt(text)).map_err(|_| {
+        self.commands.send(Command::Prompt(turn)).map_err(|_| {
             self.shared.busy.store(false, Ordering::SeqCst);
             "This thread has stopped.".to_owned()
         })

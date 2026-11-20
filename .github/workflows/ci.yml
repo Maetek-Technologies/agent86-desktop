@@ -70,5 +70,11 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
+      # cargo test regenerates the IPC types (ts-rs); the committed ones must match.
+      - name: Generated TypeScript types are up to date
+        shell: bash
+        run: |
+          git status --porcelain -- src/desktop-client/generated
+          test -z "$(git status --porcelain -- src/desktop-client/generated)"
       # Debug bundle without installers: proves the app links and packages on each OS.
       - run: pnpm tauri build --debug --no-bundle

@@ -6,13 +6,15 @@
 //! CLI resolves them: the provider's `api_key_env` variable, then the OS keyring (service
 //! `agent86`, account = provider section).
 //!
+//! It also finds the user-level skills and specialists the CLI would offer outside a project.
+//!
 //! These are agent86-core's hidden modules, outside its semver promise; Cargo.toml pins the crate
-//! exactly, and this file is the only place that touches them for the model.
+//! exactly, and this file is the only place that touches them for configuration.
 
 use agent86_core::config::{load_config, Config, ConfigPaths, Overrides, ProjectTrust};
 use agent86_core::provider::capabilities::context_window_for;
 use agent86_core::provider::provider_for_ref;
-use agent86_core::sdk::Provider;
+use agent86_core::sdk::{Provider, SubAgents};
 use agent86_core::types::ModelRef;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,4 +74,53 @@ pub fn source_label(config: &Config) -> String {
             .collect::<Vec<_>>()
             .join(", "),
     }
+}
+
+/// The user's home directory, as agent86 finds it.
+fn home() -> Option<PathBuf> {
+    ConfigPaths::discover()
+        .user
+        .and_then(|config| config.parent()?.parent().map(PathBuf::from))
+}
+
+/// The skill directories the CLI searches outside a project, highest precedence first:
+/// `~/.agent86/skills`, `~/.claude/skills`, then `[skills] paths`. Only those that exist; none
+/// when `[skills] enabled = false`. A project's own skills wait for project trust (M6).
+pub fn user_skill_dirs(config: &Config) -> Vec<PathBuf> {
+    if !config.skills.enabled {
+        return Vec::new();
+    }
+    let mut dirs = Vec::new();
+    if let Some(home) = home() {
+        dirs.push(home.join(".agent86").join("skills"));
+        dirs.push(home.join(".claude").join("skills"));
+    }
+    dirs.extend(
+        config
+            .skills
+            .paths
+            .iter()
+            .map(|path| agent86_core::session::expand_home(path)),
+    );
+    dirs.into_iter().filter(|dir| dir.is_dir()).collect()
+}
+
+/// Sub-agents as `[agents]` configures them: agent86's built-in specialists and the user's own in
+/// `~/.agent86/agents`. `None` when `[agents] enabled = false`.
+pub fn subagents(config: &Config) -> Option<SubAgents> {
+    let agents = &config.agents;
+    if !agents.enabled {
+        return None;
+    }
+    let mut subagents = SubAgents::new()
+        .max_depth(agents.max_depth)
+        .max_steps(agents.max_steps)
+        .max_parallel(agents.max_parallel);
+    if let Some(dir) = home()
+        .map(|home| home.join(".agent86").join("agents"))
+        .filter(|dir| dir.is_dir())
+    {
+        subagents = subagents.specialists_dir(dir);
+    }
+    Some(subagents)
 }

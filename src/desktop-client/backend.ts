@@ -1,33 +1,23 @@
 // The UI's only door to the Rust side. Components call these functions, never `invoke` directly,
-// so the IPC contract lives in one place: here and in src-tauri/src/commands.rs.
+// so the IPC contract lives in one place: here, src-tauri/src/commands.rs, and the types ts-rs
+// generates from it.
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { Answer, DesktopEvent } from "./events.ts";
+import type {
+  Answer,
+  AppInfo,
+  DesktopEvent,
+  ModelInfo,
+  OpenedThread,
+  TurnRequest,
+} from "./events.ts";
 
-/** What `app_info` returns: the app, the embedded agent86-core, and the platform it runs on. */
-export interface AppInfo {
-  appVersion: string;
-  coreVersion: string;
-  os: string;
-  arch: string;
-  /** Whether agent86-core could open an in-memory session store (SQLite and the SDK linked). */
-  memoryOk: boolean;
-}
+export type { AppInfo, ModelInfo, OpenedThread } from "./events.ts";
 
 export function appInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
-/** The model new threads use (M1: the agent86 CLI's default model and keys). */
-export interface ModelInfo {
-  /** `provider:model`. */
-  reference: string;
-  contextWindow: number;
-  /** The config files it came from. */
-  source: string;
-  /** Why a thread cannot start with it (no key, unknown provider), if it cannot. */
-  problem: string | null;
-}
-
+/** The model new threads use (until M5: the agent86 CLI's default model and keys). */
 export function modelInfo(): Promise<ModelInfo> {
   return invoke<ModelInfo>("model_info");
 }
@@ -35,13 +25,6 @@ export function modelInfo(): Promise<ModelInfo> {
 /** The native folder picker. `null` when the user cancels. */
 export function pickWorkspace(): Promise<string | null> {
   return invoke<string | null>("pick_workspace");
-}
-
-export interface OpenedThread {
-  threadId: string;
-  /** The workspace as resolved: absolute, symlinks followed. */
-  workspace: string;
-  model: string;
 }
 
 /** Start a thread in `workspace`; `onEvent` hears everything it streams, for its whole life. */
@@ -54,8 +37,14 @@ export function openThread(
   return invoke<OpenedThread>("open_thread", { workspace, onEvent: channel });
 }
 
-export function prompt(threadId: string, text: string): Promise<void> {
-  return invoke("prompt", { threadId, text });
+/** Start a turn: a message (its `@` mentions inlined by Rust), a skill, or a specialist. */
+export function prompt(threadId: string, turn: TurnRequest): Promise<void> {
+  return invoke("prompt", { threadId, turn });
+}
+
+/** Workspace files matching `query`, best first, for the `@` menu. */
+export function findFiles(threadId: string, query: string): Promise<string[]> {
+  return invoke<string[]>("find_files", { threadId, query });
 }
 
 export function cancelTurn(threadId: string): Promise<void> {
