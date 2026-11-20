@@ -51,6 +51,8 @@ Base64 a file with `base64 -w0 file` (Linux), `base64 -i file` (macOS), or
    `.dmg` files and `*.app.tar.gz` (with `.sig`) for `aarch64` and `x64`, the `.AppImage` (with
    `.sig`), `.deb`, `.rpm`, and `latest.json` listing `windows-x86_64`, `darwin-aarch64`,
    `darwin-x86_64`, and `linux-x86_64`.
+   A last job points `latest.json` at the release's download links (tauri-action writes API
+   asset URLs for a draft); check its entries end in file names, not numbers.
 5. Edit the release notes, then **Publish release**. Apps that check for updates find it from then
    on.
 

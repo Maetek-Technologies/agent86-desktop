@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.1.0).
 
-Status: M8 (ship) built 2026-11-20: version 1.0.0, release workflow, updater, user guide; Windows installers and the update check verified locally. The v1.0.0 draft release waits for the updater key's repository secrets (docs/RELEASING.md). M0-M7 green in CI on Windows, macOS, and Linux.
+Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed.
 
 ---
 

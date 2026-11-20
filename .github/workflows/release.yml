@@ -140,3 +140,32 @@ jobs:
           # Per-user NSIS installs update without an administrator prompt.
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }} ${{ env.TAURI_EXTRA_ARGS }}
+
+  updater-urls:
+    # tauri-action writes GitHub API asset URLs into latest.json while the release is a draft.
+    # Point them at the release's download links instead, which are not rate-limited.
+    name: latest.json download links
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Rewrite the updater URLs
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D out
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .assets[] | \"\(.id)\t\(.name)\"" > out/assets.tsv
+          python3 - <<'PY'
+          import json, os
+          tag, repo = os.environ["TAG"], os.environ["GITHUB_REPOSITORY"]
+          ids = dict(line.rstrip("\n").split("\t") for line in open("out/assets.tsv"))
+          manifest = json.load(open("out/latest.json"))
+          base = f"https://github.com/{repo}/releases/download/{tag}/"
+          for platform in manifest["platforms"].values():
+              asset = platform["url"].rsplit("/", 1)[-1]
+              if asset in ids:
+                  platform["url"] = base + ids[asset]
+          json.dump(manifest, open("out/latest.json", "w"), indent=2)
+          PY
+          gh release upload "$TAG" out/latest.json --clobber -R "$GITHUB_REPOSITORY"
