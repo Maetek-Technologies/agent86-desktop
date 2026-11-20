@@ -2,6 +2,7 @@ mod agent_factory;
 mod cli_import;
 mod commands;
 mod desktop;
+mod elevation;
 mod file_actions;
 mod keys;
 mod logs;
@@ -19,6 +20,8 @@ mod workspace_files;
 use tauri::Manager;
 
 pub fn run() {
+    // Before anything else: an elevated start (an MSI update's relaunch) starts again unelevated.
+    let elevation = elevation::ensure_not_elevated();
     let config_override = config_override();
     let mut builder = tauri::Builder::default();
     // A second launch brings the running app forward instead of opening another window. A
@@ -94,6 +97,7 @@ pub fn run() {
                     .map(|dir| dir.display().to_string())
                     .unwrap_or_else(|| "no folder".into())
             );
+            elevation::log(&elevation);
             let store = settings::SettingsStore::open(config_dir.as_deref());
             let ui = store.get().ok().flatten().map(|s| s.ui).unwrap_or_default();
             app.manage(store);

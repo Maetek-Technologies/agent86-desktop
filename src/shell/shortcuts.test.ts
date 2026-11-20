@@ -20,6 +20,7 @@ test("each action has its keys", () => {
   expect(ctrl("l")).toEqual({ type: "focusPrompt" });
   expect(ctrl(".")).toEqual({ type: "stopTurn" });
   expect(ctrl(",")).toEqual({ type: "settings" });
+  expect(ctrl("b")).toEqual({ type: "toggleSidebar" });
   expect(ctrl("Tab")).toEqual({ type: "nextTab" });
   expect(ctrl("Tab", true)).toEqual({ type: "previousTab" });
   expect(ctrl("PageDown")).toEqual({ type: "nextTab" });

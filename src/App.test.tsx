@@ -437,6 +437,34 @@ test("renames an open tab with F2", async () => {
   });
 });
 
+test("the sessions panel hides and shows (button and Ctrl+B), resizes, and is remembered", async () => {
+  backend();
+  const { unmount } = render(<App />);
+  await screen.findByRole("navigation", { name: "Sessions" });
+  fireEvent.click(screen.getByRole("button", { name: "Hide sessions" }));
+  expect(screen.queryByRole("navigation", { name: "Sessions" })).toBeNull();
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  expect(await screen.findByRole("navigation", { name: "Sessions" })).toBeTruthy();
+  // The edge resizes with the keyboard, within the panel's limits.
+  const edge = screen.getByRole("separator", { name: "Resize sessions panel" });
+  fireEvent.keyDown(edge, { key: "ArrowRight", shiftKey: true });
+  expect(edge.getAttribute("aria-valuenow")).toBe("304");
+  fireEvent.keyDown(edge, { key: "End" });
+  expect(edge.getAttribute("aria-valuenow")).toBe("560");
+  fireEvent.click(screen.getByRole("button", { name: "Hide sessions" }));
+  unmount();
+  // A new start keeps both.
+  render(<App />);
+  await screen.findByRole("button", { name: "Show sessions" });
+  expect(screen.queryByRole("navigation", { name: "Sessions" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show sessions" }));
+  expect(
+    (await screen.findByRole("separator", { name: "Resize sessions panel" })).getAttribute(
+      "aria-valuenow",
+    ),
+  ).toBe("560");
+});
+
 test("closes a tab and its thread", async () => {
   const calls = backend();
   render(<App />);

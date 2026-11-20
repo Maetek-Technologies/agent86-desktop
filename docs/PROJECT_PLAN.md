@@ -266,6 +266,16 @@ An embedder that falls back to the hash one is tried once more, and the note and
 it failed. Sessions are renamed from the sidebar (✎) or with F2 on a tab, besides double-clicking
 its title.
 
+**1.0.3: never elevated; a collapsible sessions panel.** An update of a per-machine (MSI) install
+relaunches the app with the installer's admin token, so the agent's commands ran as administrator
+and Windows would not follow the Hugging Face cache's user-made symlinks (memory fell back to the
+hash embedder). `elevation.rs` checks the token first thing in `run()` and, when elevated, starts
+the app again through `explorer.exe` (unelevated) and exits; it stays elevated, with a warning in
+the log, under `AGENT86_DESKTOP_ALLOW_ELEVATED`, a separate profile, or a relaunch under a minute
+old that came back elevated (UAC off). The sessions panel hides and shows (‹ › beside the tabs,
+Mod+B) and resizes from its right edge (180 to 560 px, keys too, double-click resets), kept in
+localStorage as agent86-web keeps it.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives

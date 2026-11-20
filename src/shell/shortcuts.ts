@@ -10,7 +10,8 @@ export type Shortcut =
   | { type: "lastTab" }
   | { type: "focusPrompt" }
   | { type: "stopTurn" }
-  | { type: "settings" };
+  | { type: "settings" }
+  | { type: "toggleSidebar" };
 
 /** The parts of a `KeyboardEvent` a shortcut depends on. */
 export interface Keys {
@@ -62,6 +63,8 @@ export function shortcutFor(keys: Keys, mac: boolean): Shortcut | null {
       return { type: "stopTurn" };
     case ",":
       return { type: "settings" };
+    case "b":
+      return { type: "toggleSidebar" };
     case "9":
       return { type: "lastTab" };
   }
@@ -87,6 +90,7 @@ export function shortcutList(mac: boolean): { keys: string; action: string }[] {
     { keys: `${mod}L`, action: "Focus the prompt" },
     { keys: `${mod}.`, action: "Stop the running turn" },
     { keys: `${mod},`, action: "Settings" },
+    { keys: `${mod}B`, action: "Show or hide the sessions panel" },
   ];
 }
 

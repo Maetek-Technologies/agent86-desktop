@@ -156,6 +156,10 @@ background needs an approval, a limit raise, or a secret, and when a turn of 30 
 ends; clicking one shows that thread. The window remembers its size and place. Opening the app
 again while it runs brings the open window forward.
 
+The sessions panel on the left hides and shows with the **‹ ›** button at the left end of the tabs
+(or Ctrl+B). Drag its right edge to make it wider or narrower (or focus the edge and use the arrow
+keys); double-click the edge to reset it. The app remembers both.
+
 | Keys (⌘ on macOS)                         | Does                          |
 | ----------------------------------------- | ----------------------------- |
 | Ctrl+T                                    | New thread                    |
@@ -166,6 +170,7 @@ again while it runs brings the open window forward.
 | Ctrl+L                                    | Focus the prompt              |
 | Ctrl+.                                    | Stop the running turn         |
 | Ctrl+,                                    | Settings                      |
+| Ctrl+B                                    | Show or hide the sessions panel |
 
 ## Updates
 
@@ -175,6 +180,11 @@ About**). When there is one, the sidebar says so; **Settings, About** shows the 
 installed. On Windows the installer closes the app to update it; on macOS and with the Linux
 AppImage, **Restart now** finishes. A `.deb` or `.rpm` install is updated with your package manager
 (download the new package from the release).
+
+On Windows the app never stays running as administrator: the agent's commands would run with
+admin rights too. When an update of an all-users install (in `C:\Program Files`) restarts it
+elevated, or you start it with **Run as administrator**, it starts itself again as you. To keep
+admin rights on purpose, set the environment variable `AGENT86_DESKTOP_ALLOW_ELEVATED=1`.
 
 ## Where things are kept
 

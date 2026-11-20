@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SessionList, SessionSummary, UpdateInfo } from "../desktop-client/events.ts";
 import { modLabel } from "./shortcuts.ts";
+import { clampSidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from "./layout.ts";
 import { folderName } from "./tabs.ts";
 import { RenameInput } from "./Tabs.tsx";
 
@@ -21,6 +22,8 @@ export function ago(seconds: number, now = Date.now() / 1000): string {
  */
 export function Sidebar({
   list,
+  width = SIDEBAR_DEFAULT,
+  onResize,
   openSessions,
   busy,
   onNew,
@@ -37,6 +40,9 @@ export function Sidebar({
   logsOpen = false,
 }: {
   list: SessionList | null;
+  /** Pixels; the right edge drags between the panel's limits. */
+  width?: number;
+  onResize?: (width: number) => void;
   /** Session ids open in tabs. */
   openSessions: ReadonlySet<string>;
   /** A thread is being opened; the buttons wait. */
@@ -59,7 +65,10 @@ export function Sidebar({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
+    <aside
+      style={{ width }}
+      className="relative flex shrink-0 flex-col border-r border-border bg-panel text-sm"
+    >
       <div className="flex items-center gap-2 border-b border-border p-2">
         <img src="/agent86-logo.png" alt="" width={24} height={24} />
         <button
@@ -193,6 +202,48 @@ export function Sidebar({
           ⚙ Settings
         </button>
       </div>
+      {onResize && <ResizeHandle width={width} onResize={onResize} />}
     </aside>
+  );
+}
+
+/** The panel's right edge: drag, arrow keys (Shift for bigger steps), or double-click to reset. */
+function ResizeHandle({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+  const drag = useRef<{ x: number; width: number } | undefined>(undefined);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sessions panel"
+      aria-valuenow={width}
+      aria-valuemin={SIDEBAR_MIN}
+      aria-valuemax={SIDEBAR_MAX}
+      tabIndex={0}
+      title="Drag to resize, double-click to reset"
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { x: event.clientX, width };
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current) return;
+        onResize(clampSidebar(drag.current.width + event.clientX - drag.current.x));
+      }}
+      onPointerUp={(event) => {
+        drag.current = undefined;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onDoubleClick={() => onResize(SIDEBAR_DEFAULT)}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 48 : 16;
+        if (event.key === "ArrowLeft") onResize(clampSidebar(width - step));
+        else if (event.key === "ArrowRight") onResize(clampSidebar(width + step));
+        else if (event.key === "Home") onResize(SIDEBAR_MIN);
+        else if (event.key === "End") onResize(SIDEBAR_MAX);
+        else return;
+        event.preventDefault();
+      }}
+      className="absolute top-0 -right-0.5 z-10 h-full w-1.5 cursor-col-resize hover:bg-accent/50 focus-visible:bg-accent/70 focus-visible:outline-none"
+    />
   );
 }

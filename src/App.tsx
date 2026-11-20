@@ -34,7 +34,8 @@ import type {
 } from "./desktop-client/events.ts";
 import type { LocalAction } from "./desktop-client/session-state.ts";
 import { notificationFor } from "./shell/notify.ts";
-import { isMac, shortcutFor, tabTarget } from "./shell/shortcuts.ts";
+import { isMac, modLabel, shortcutFor, tabTarget } from "./shell/shortcuts.ts";
+import { loadSidebar, saveSidebar, type SidebarLayout } from "./shell/layout.ts";
 import { Sidebar } from "./shell/Sidebar.tsx";
 import { Tabs } from "./shell/Tabs.tsx";
 import { applyTheme } from "./shell/theme.ts";
@@ -63,6 +64,24 @@ export function App() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [showMemory, setShowMemory] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  // The sessions panel: shown or hidden (‹ › beside the tabs, or Mod+B) and its width.
+  const [sidebar, setSidebar] = useState(loadSidebar);
+  const changeSidebar = useCallback((next: Partial<SidebarLayout>) => {
+    setSidebar((current) => {
+      const updated = { ...current, ...next };
+      saveSidebar(updated);
+      return updated;
+    });
+  }, []);
+  const toggleSidebar = useCallback(
+    () =>
+      setSidebar((current) => {
+        const updated = { ...current, shown: !current.shown };
+        saveSidebar(updated);
+        return updated;
+      }),
+    [],
+  );
   const [opening, setOpening] = useState(false);
   const [state, dispatchTabs] = useReducer(tabsReduce, NO_TABS);
   const stateRef = useRef(state);
@@ -303,6 +322,9 @@ export function App() {
         case "settings":
           toggleSettings();
           break;
+        case "toggleSidebar":
+          toggleSidebar();
+          break;
         default: {
           const key = tabTarget(
             shortcut,
@@ -316,7 +338,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hasSettings, canOpen, newThread, close, toggleSettings, dispatch]);
+  }, [hasSettings, canOpen, newThread, close, toggleSettings, toggleSidebar, dispatch]);
 
   const rename = useCallback(
     (key: string, title: string) => {
@@ -365,34 +387,54 @@ export function App() {
 
   return (
     <div className="flex h-screen bg-bg text-text">
-      <Sidebar
-        list={sessions}
-        openSessions={openSessions}
-        busy={opening || !model || !!model.problem}
-        onNew={() => void newThread()}
-        onOpen={(session) => void reopen(session)}
-        onRename={renameSaved}
-        onRefresh={refreshSessions}
-        onSettings={toggleSettings}
-        settingsOpen={showSettings}
-        onMemory={() => setShowMemory((open) => !open)}
-        memoryOpen={showMemory}
-        update={update}
-        onUpdate={() => openSettings("About")}
-        onLogs={() => setShowLogs((open) => !open)}
-        logsOpen={showLogs}
-      />
+      {sidebar.shown && (
+        <Sidebar
+          list={sessions}
+          width={sidebar.width}
+          onResize={(width) => changeSidebar({ width })}
+          openSessions={openSessions}
+          busy={opening || !model || !!model.problem}
+          onNew={() => void newThread()}
+          onOpen={(session) => void reopen(session)}
+          onRename={renameSaved}
+          onRefresh={refreshSessions}
+          onSettings={toggleSettings}
+          settingsOpen={showSettings}
+          onMemory={() => setShowMemory((open) => !open)}
+          memoryOpen={showMemory}
+          update={update}
+          onUpdate={() => openSettings("About")}
+          onLogs={() => setShowLogs((open) => !open)}
+          logsOpen={showLogs}
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        {state.tabs.length > 0 && (
-          <Tabs
-            tabs={state.tabs}
-            active={state.active}
-            titleOf={titleOf}
-            onActivate={(key) => dispatch({ type: "activate", key })}
-            onClose={close}
-            onRename={rename}
-          />
-        )}
+        <div className="flex shrink-0 items-stretch">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebar.shown ? "Hide sessions" : "Show sessions"}
+            aria-expanded={sidebar.shown}
+            title={`${sidebar.shown ? "Hide" : "Show"} the sessions panel (${modLabel()}B)`}
+            className="border-r border-b border-border bg-panel px-2 py-1.5 text-muted hover:text-text"
+          >
+            {sidebar.shown ? "‹" : "›"}
+          </button>
+          <div
+            className={`min-w-0 flex-1 ${state.tabs.length > 0 ? "" : "border-b border-border bg-panel"}`}
+          >
+            {state.tabs.length > 0 && (
+              <Tabs
+                tabs={state.tabs}
+                active={state.active}
+                titleOf={titleOf}
+                onActivate={(key) => dispatch({ type: "activate", key })}
+                onClose={close}
+                onRename={rename}
+              />
+            )}
+          </div>
+        </div>
         {error && (
           <div
             role="alert"
