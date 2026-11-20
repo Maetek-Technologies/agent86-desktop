@@ -1,0 +1,31 @@
+[package]
+name = "agent86-desktop"
+version = "0.1.0"
+description = "A desktop app for agent86"
+license = "MIT"
+edition = "2021"
+# agent86-core's minimum supported Rust version.
+rust-version = "1.94"
+
+[lib]
+# The `_lib` suffix avoids a name clash with the binary on Windows (cargo#8519).
+name = "agent86_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Pinned exactly: the app uses `Memory::store()` and the embedder builder, which sit outside the
+# crate's semver promise (docs/PROJECT_PLAN.md D2, risks). Default features stay on: the OS keyring
+# and `local-embeddings`, so memory shared with the CLI uses the CLI's embedder.
+agent86-core = "=1.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
