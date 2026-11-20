@@ -2,6 +2,7 @@
 //! [`TurnEvent`]s, plus the turn's end. The TypeScript side mirrors this in
 //! `src/desktop-client/events.ts`.
 
+use super::questions::{ApprovalInfo, LimitInfo};
 use agent86_core::sdk::{TurnEvent, TurnSummary, Usage};
 use serde::Serialize;
 use serde_json::Value;
@@ -49,6 +50,24 @@ pub enum DesktopEvent {
         notice: String,
         summary: Option<String>,
     },
+    /// A side-effecting call waits for the user's approval. Answer with `answer` and this `qid`.
+    ApprovalRequest {
+        qid: u64,
+        tool: String,
+        preview: ApprovalInfo,
+    },
+    /// The turn reached a limit; the user may raise it to one of the offers or stop.
+    LimitRequest { qid: u64, limit: LimitInfo },
+    /// The model asks for a secret through `request_secret`. Only its name and reason are sent;
+    /// the value goes the other way, once.
+    SecretRequest {
+        qid: u64,
+        name: String,
+        reason: String,
+        replacing: bool,
+    },
+    /// Question `qid` is over: answered, or dropped because the turn was cancelled.
+    QuestionClosed { qid: u64, answered: bool },
     /// The turn is over and the thread takes a new prompt.
     TurnEnded {
         stop_reason: StopReason,

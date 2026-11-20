@@ -2,6 +2,7 @@
 //! Commands that touch the disk or the network are `async`, so they never run on the UI thread.
 
 use crate::cli_config;
+use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
 use agent86_core::sdk::{Agent, ApprovalMode, Builtins, Memory};
 use serde::Serialize;
@@ -115,7 +116,7 @@ pub async fn open_thread(
                 .provider(setup.provider)
                 .workspace(agent_workspace)
                 .builtins(Builtins::All)
-                // M1 has no approver yet, so every side-effecting call is declined. M2 adds one.
+                // Side-effecting calls go to the user; the thread actor installs the approver.
                 .approval(ApprovalMode::Ask)
                 .guardrails(guardrails)
                 .context_window(setup.context_window)
@@ -149,6 +150,17 @@ pub fn prompt(
 #[tauri::command]
 pub fn cancel_turn(threads: State<'_, ThreadManager>, thread_id: String) -> Result<(), String> {
     threads.cancel(&thread_id)
+}
+
+/// The user's answer to a question the running turn asked (an approval, a limit, a secret).
+#[tauri::command]
+pub fn answer(
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+    qid: u64,
+    answer: Answer,
+) -> Result<(), String> {
+    threads.answer(&thread_id, qid, answer)
 }
 
 #[tauri::command]

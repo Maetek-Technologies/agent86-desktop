@@ -1,7 +1,7 @@
 //! One thread: an `agent86_core::sdk::Agent` owned by an OS thread of its own.
 //!
 //! `Agent::run_with_events` takes `&mut self`, and the SDK's approval, limit, and secret callbacks
-//! are synchronous and run on the turn's thread (they arrive in M2). So each thread gets a
+//! are synchronous and run on the turn's thread (see `questions.rs`). So each thread gets a
 //! dedicated OS thread with a current-thread tokio runtime: a callback can block until the UI
 //! answers without holding up any other thread, and the agent never moves between threads.
 //!
@@ -12,6 +12,7 @@
 //! [`ThreadHandle::prompt`] and that point; a watcher running beside the turn re-applies it.
 
 use super::events::{DesktopEvent, StopReason, TurnInfo, UsageInfo};
+use super::questions::{Answer, Questions};
 use agent86_core::sdk::{AgentBuilder, CancelToken};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -33,7 +34,8 @@ enum Command {
 /// State the handle and the actor share.
 struct Shared {
     busy: AtomicBool,
-    cancel_requested: AtomicBool,
+    /// Shared with [`Questions`] too, so a cancel answers any open question "no".
+    cancel_requested: Arc<AtomicBool>,
 }
 
 /// The UI side of a thread. Dropping it cancels any running turn and lets the actor exit.
@@ -41,6 +43,7 @@ pub struct ThreadHandle {
     commands: mpsc::Sender<Command>,
     cancel: CancelToken,
     shared: Arc<Shared>,
+    questions: Arc<Questions>,
 }
 
 impl ThreadHandle {
@@ -51,9 +54,11 @@ impl ThreadHandle {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<CancelToken, String>>();
         let shared = Arc::new(Shared {
             busy: AtomicBool::new(false),
-            cancel_requested: AtomicBool::new(false),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
         });
         let actor_shared = shared.clone();
+        let questions = Questions::new(sink.clone(), shared.cancel_requested.clone());
+        let (approve, limit, secret) = (questions.clone(), questions.clone(), questions.clone());
 
         std::thread::Builder::new()
             .name("agent86-thread".into())
@@ -71,7 +76,15 @@ impl ThreadHandle {
                 // Building may start MCP servers, which need the runtime.
                 let built = {
                     let _entered = runtime.enter();
-                    make().and_then(|builder| builder.build().map_err(|error| error.to_string()))
+                    make().and_then(|builder| {
+                        builder
+                            // Every question goes to the UI and waits for its answer (M2).
+                            .approver(move |tool, preview| approve.approve(tool, preview))
+                            .on_limit(move |hit| limit.raise_limit(hit))
+                            .on_secret_request(move |request| secret.secret(request))
+                            .build()
+                            .map_err(|error| error.to_string())
+                    })
                 };
                 let mut agent = match built {
                     Ok(agent) => agent,
@@ -150,6 +163,7 @@ impl ThreadHandle {
             commands,
             cancel,
             shared,
+            questions,
         })
     }
 
@@ -169,7 +183,13 @@ impl ThreadHandle {
         })
     }
 
-    /// Stop the running turn at its next safe point. Does nothing when idle.
+    /// Answer question `qid` of the running turn.
+    pub fn answer(&self, qid: u64, answer: Answer) -> Result<(), String> {
+        self.questions.answer(qid, answer)
+    }
+
+    /// Stop the running turn at its next safe point, answering any open question "no". Does
+    /// nothing when idle.
     pub fn cancel(&self) {
         if self.shared.busy.load(Ordering::SeqCst) {
             self.shared.cancel_requested.store(true, Ordering::SeqCst);

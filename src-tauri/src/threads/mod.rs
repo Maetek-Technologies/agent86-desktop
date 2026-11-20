@@ -3,9 +3,11 @@
 pub mod actor;
 pub mod events;
 pub mod manager;
+pub mod questions;
 
 #[cfg(test)]
 mod tests;
 
+pub use actor::EventSink;
 pub use events::DesktopEvent;
 pub use manager::ThreadManager;

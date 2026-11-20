@@ -7,11 +7,14 @@ const STATUS: Record<ToolEntry["status"], { label: string; className: string }> 
   failed: { label: "failed", className: "text-error" },
 };
 
-// M1's tool card: the call, its status, and its output on demand. agent86-web's richer card
-// (diffs, approvals, sub-agents) replaces it in M3.
+// The tool card: the call, its status, and its output on demand. agent86-web's richer card
+// (result diffs, sub-agents) replaces it in M3; approvals show in the panel above the input.
 export function ToolCard({ entry }: { entry: ToolEntry }) {
   const [open, setOpen] = useState(false);
-  const status = STATUS[entry.status];
+  const status =
+    entry.approvalQid !== undefined
+      ? { label: "awaiting approval", className: "text-warn" }
+      : STATUS[entry.status];
   const hasDetail = entry.output || entry.error;
   return (
     <div className="my-2 rounded-md border border-border bg-panel text-sm">

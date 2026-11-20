@@ -5,10 +5,11 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M1.** One thread runs real turns: streamed answers, thinking, tool cards, and
-> cancel. The model and its key come from your agent86 CLI config (`~/.agent86/config.toml` and
-> the OS keyring) until the app has settings of its own (M5). Writes and commands are declined
-> until approvals arrive (M2). The plan and milestones are in
+> **Status: M2.** One thread runs real turns: streamed answers, thinking, tool cards, cancel,
+> and approvals. Writes and commands wait for your approval (with a diff for file changes);
+> limits can be raised mid-turn, and the model can ask for a secret through a masked prompt. The
+> model and its key come from your agent86 CLI config (`~/.agent86/config.toml` and the OS
+> keyring) until the app has settings of its own (M5). The plan and milestones are in
 > [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Prerequisites

@@ -13,6 +13,7 @@ pub fn run() {
             commands::open_thread,
             commands::prompt,
             commands::cancel_turn,
+            commands::answer,
             commands::close_thread,
         ])
         .run(tauri::generate_context!())

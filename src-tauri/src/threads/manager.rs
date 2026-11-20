@@ -31,6 +31,15 @@ impl ThreadManager {
         })
     }
 
+    pub fn answer(
+        &self,
+        id: &str,
+        qid: u64,
+        answer: super::questions::Answer,
+    ) -> Result<(), String> {
+        self.with(id, |thread| thread.answer(qid, answer))
+    }
+
     /// Close a thread: cancels its turn, if any, and lets its actor exit.
     pub fn close(&self, id: &str) -> Result<(), String> {
         self.lock().remove(id).map(drop).ok_or_else(|| unknown(id))

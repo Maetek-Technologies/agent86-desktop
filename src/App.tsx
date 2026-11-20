@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import {
+  answer,
   appInfo,
   cancelTurn,
   closeThread,
@@ -11,10 +12,11 @@ import {
   type ModelInfo,
   type OpenedThread,
 } from "./desktop-client/backend.ts";
+import type { Answer } from "./desktop-client/events.ts";
 import { initialState, reduce } from "./desktop-client/session-state.ts";
 import { ThreadView } from "./thread/ThreadView.tsx";
 
-// M1: one thread at a time. Tabs and the session list arrive in M4.
+// One thread at a time for now. Tabs and the session list arrive in M4.
 export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [model, setModel] = useState<ModelInfo | null>(null);
@@ -65,6 +67,16 @@ export function App() {
     );
   }, [thread]);
 
+  const reply = useCallback(
+    (qid: number, given: Answer) => {
+      if (!thread) return;
+      answer(thread.threadId, qid, given).catch((e: unknown) =>
+        dispatch({ type: "local/warning", text: String(e) }),
+      );
+    },
+    [thread],
+  );
+
   const close = useCallback(() => {
     if (thread) void closeThread(thread.threadId).catch(() => {});
     setThread(null);
@@ -72,7 +84,16 @@ export function App() {
   }, [thread]);
 
   if (thread) {
-    return <ThreadView thread={thread} state={state} onSend={send} onStop={stop} onClose={close} />;
+    return (
+      <ThreadView
+        thread={thread}
+        state={state}
+        onSend={send}
+        onStop={stop}
+        onAnswer={reply}
+        onClose={close}
+      />
+    );
   }
 
   return (

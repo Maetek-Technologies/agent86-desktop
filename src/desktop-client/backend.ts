@@ -1,7 +1,7 @@
 // The UI's only door to the Rust side. Components call these functions, never `invoke` directly,
 // so the IPC contract lives in one place: here and in src-tauri/src/commands.rs.
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { DesktopEvent } from "./events.ts";
+import type { Answer, DesktopEvent } from "./events.ts";
 
 /** What `app_info` returns: the app, the embedded agent86-core, and the platform it runs on. */
 export interface AppInfo {
@@ -60,6 +60,11 @@ export function prompt(threadId: string, text: string): Promise<void> {
 
 export function cancelTurn(threadId: string): Promise<void> {
   return invoke("cancel_turn", { threadId });
+}
+
+/** Answer question `qid` (an approval, a limit raise, a secret) of the thread's running turn. */
+export function answer(threadId: string, qid: number, answer: Answer): Promise<void> {
+  return invoke("answer", { threadId, qid, answer });
 }
 
 export function closeThread(threadId: string): Promise<void> {

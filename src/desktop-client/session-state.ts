@@ -1,7 +1,14 @@
 // A thread's transcript as plain state, and the pure function that folds Rust's events into it.
 // React renders this; tests assert on it without a DOM. The entry shapes follow agent86-web's
 // acp-client session state so its components can be ported in M3.
-import type { DesktopEvent, TurnInfo, UsageInfo } from "./events.ts";
+import type { ApprovalInfo, DesktopEvent, LimitInfo, TurnInfo, UsageInfo } from "./events.ts";
+
+/** A file change shown as a diff: the whole file before (`null` when new) and after. */
+export interface FileDiff {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
 
 export interface UserEntry {
   kind: "user";
@@ -47,9 +54,17 @@ export interface ToolEntry {
   output?: string;
   truncated?: boolean;
   error?: string | null;
+  /** The approval question this call waits on, while it waits. */
+  approvalQid?: number;
 }
 
 export type Entry = UserEntry | AgentEntry | ThoughtEntry | NoticeEntry | ErrorEntry | ToolEntry;
+
+/** A question the running turn waits on. Rust closes it with `questionClosed`. */
+export type Question =
+  | { kind: "approval"; qid: number; tool: string; preview: ApprovalInfo }
+  | { kind: "limit"; qid: number; limit: LimitInfo }
+  | { kind: "secret"; qid: number; name: string; reason: string; replacing: boolean };
 
 export interface SessionState {
   entries: Entry[];
@@ -60,6 +75,8 @@ export interface SessionState {
   /** The session's usage so far. */
   usage: UsageInfo | null;
   lastTurn: TurnInfo | null;
+  /** Open questions, oldest first. agent86 asks one at a time, but the list keeps that honest. */
+  questions: Question[];
   nextId: number;
 }
 
@@ -70,6 +87,7 @@ export function initialState(): SessionState {
     cancelling: false,
     usage: null,
     lastTurn: null,
+    questions: [],
     nextId: 1,
   };
 }
@@ -79,6 +97,8 @@ export type LocalAction =
   | { type: "local/prompt"; text: string }
   | { type: "local/cancelling" }
   | { type: "local/error"; text: string }
+  /** A problem that does not end the turn, such as an answer Rust refused. */
+  | { type: "local/warning"; text: string }
   | { type: "local/reset" };
 
 export function reduce(state: SessionState, action: DesktopEvent | LocalAction): SessionState {
@@ -99,6 +119,8 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         id,
         text: action.text,
       }));
+    case "local/warning":
+      return push(state, (id) => ({ kind: "error", id, text: action.text }));
     case "agentText":
       return appendText(state, "agent", action.text);
     case "thought":
@@ -133,6 +155,35 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
             : entry,
         ),
       };
+    case "approvalRequest":
+      return {
+        ...markAwaiting(state, action.tool, action.qid),
+        questions: [
+          ...state.questions,
+          { kind: "approval", qid: action.qid, tool: action.tool, preview: action.preview },
+        ],
+      };
+    case "limitRequest":
+      return {
+        ...state,
+        questions: [...state.questions, { kind: "limit", qid: action.qid, limit: action.limit }],
+      };
+    case "secretRequest":
+      return {
+        ...state,
+        questions: [
+          ...state.questions,
+          {
+            kind: "secret",
+            qid: action.qid,
+            name: action.name,
+            reason: action.reason,
+            replacing: action.replacing,
+          },
+        ],
+      };
+    case "questionClosed":
+      return closeQuestion(state, action.qid);
     case "usage":
       return { ...state, usage: action.session };
     case "turnEnded":
@@ -142,13 +193,17 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         cancelling: false,
         usage: action.usage,
         lastTurn: action.turn,
+        questions: [],
       };
     case "turnFailed":
-      return push({ ...settleTools(state), running: false, cancelling: false }, (id) => ({
-        kind: "error",
-        id,
-        text: action.error,
-      }));
+      return push(
+        { ...settleTools(state), running: false, cancelling: false, questions: [] },
+        (id) => ({
+          kind: "error",
+          id,
+          text: action.error,
+        }),
+      );
   }
 }
 
@@ -181,6 +236,30 @@ function settleTools(state: SessionState): SessionState {
     entries: state.entries.map((entry) =>
       entry.kind === "tool" && entry.status === "running"
         ? { ...entry, status: "failed", error: entry.error ?? "did not finish" }
+        : entry,
+    ),
+  };
+}
+
+/** The newest running call of `tool` now waits on approval `qid`. */
+function markAwaiting(state: SessionState, tool: string, qid: number): SessionState {
+  const index = state.entries.findLastIndex(
+    (e) =>
+      e.kind === "tool" && e.name === tool && e.status === "running" && e.approvalQid === undefined,
+  );
+  if (index < 0) return state;
+  const entries = state.entries.slice();
+  entries[index] = { ...(entries[index] as ToolEntry), approvalQid: qid };
+  return { ...state, entries };
+}
+
+function closeQuestion(state: SessionState, qid: number): SessionState {
+  return {
+    ...state,
+    questions: state.questions.filter((q) => q.qid !== qid),
+    entries: state.entries.map((entry) =>
+      entry.kind === "tool" && entry.approvalQid === qid
+        ? { ...entry, approvalQid: undefined }
         : entry,
     ),
   };
