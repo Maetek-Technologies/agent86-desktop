@@ -2,7 +2,9 @@
 //! Commands that touch the disk or the network are `async`, so they never run on the UI thread.
 
 use crate::cli_config;
+use crate::sessions::{SessionList, Sessions};
 use crate::threads::actor::Capabilities;
+use crate::threads::history::HistoryItem;
 use crate::threads::manager::TurnRequest;
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
@@ -12,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use ts_rs::TS;
 
@@ -104,16 +106,41 @@ pub struct OpenedThread {
     #[ts(type = "number")]
     pub context_window: u64,
     pub capabilities: Capabilities,
+    /// The agent86 session this thread saves to (new, or the one reopened).
+    pub session_id: String,
+    /// A reopened session's conversation; empty for a new one.
+    pub history: Vec<HistoryItem>,
+    /// Something to know about saving: the embedder fell back, or memory is off.
+    pub memory_note: Option<String>,
 }
 
-/// Start a thread in `workspace`. Its events stream on `on_event` for the thread's life.
+/// Start a thread in `workspace`, continuing saved session `session_id` if given. Its events
+/// stream on `on_event` for the thread's life. Sessions are saved to the memory database shared
+/// with the agent86 CLI.
 #[tauri::command]
 pub async fn open_thread(
-    threads: State<'_, ThreadManager>,
+    app: tauri::AppHandle,
     workspace: String,
+    session_id: Option<String>,
     on_event: Channel<DesktopEvent>,
 ) -> Result<OpenedThread, String> {
-    let workspace = resolve_workspace(&workspace)?;
+    // Loading the embedder (first time) and building the agent block, so not on an async worker.
+    tauri::async_runtime::spawn_blocking(move || {
+        open_thread_blocking(&app, &workspace, session_id, on_event)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn open_thread_blocking(
+    app: &tauri::AppHandle,
+    workspace: &str,
+    session_id: Option<String>,
+    on_event: Channel<DesktopEvent>,
+) -> Result<OpenedThread, String> {
+    let threads = app.state::<ThreadManager>();
+    let sessions = app.state::<Sessions>();
+    let workspace = resolve_workspace(workspace)?;
     let config = cli_config::load()?;
     let setup = cli_config::model_setup(&config)?;
     let model = setup.reference.clone();
@@ -123,8 +150,19 @@ pub async fn open_thread(
     let skill_dirs = cli_config::user_skill_dirs(&config);
     let subagents = cli_config::subagents(&config);
     let agent_workspace = workspace.clone();
+    let (memory, memory_note) = match sessions.memory() {
+        Ok(opened) => (Some(opened.memory), opened.note),
+        Err(_) if session_id.is_some() => {
+            return Err(
+                "The memory database is not available, so saved sessions cannot be reopened."
+                    .into(),
+            )
+        }
+        Err(problem) => (None, Some(format!("This thread is not saved: {problem}"))),
+    };
+    let resume = session_id.clone();
 
-    let (thread_id, capabilities) = threads.open(
+    let opened = threads.open(
         Box::new(move || {
             let mut builder = Agent::builder()
                 .provider(setup.provider)
@@ -145,6 +183,12 @@ pub async fn open_thread(
             if let Some(subagents) = subagents {
                 builder = builder.subagents(subagents);
             }
+            if let Some(memory) = memory {
+                builder = builder.memory(memory);
+                if let Some(id) = resume {
+                    builder = builder.session(id);
+                }
+            }
             Ok(builder)
         }),
         Arc::new(move |event| {
@@ -153,14 +197,45 @@ pub async fn open_thread(
         }),
         workspace.clone(),
         config.tools.mention_max_bytes,
+        session_id.as_deref(),
     )?;
+    sessions.record_workspace(&opened.session_id, &workspace);
     Ok(OpenedThread {
-        thread_id,
+        thread_id: opened.id,
         workspace: workspace.display().to_string(),
         model,
         context_window,
-        capabilities,
+        capabilities: opened.capabilities,
+        session_id: opened.session_id,
+        history: opened.history,
+        memory_note,
     })
+}
+
+/// Recent saved sessions, newest first, from the memory database shared with the agent86 CLI.
+#[tauri::command]
+pub async fn list_sessions(
+    app: tauri::AppHandle,
+    limit: Option<usize>,
+) -> Result<SessionList, String> {
+    let limit = limit.unwrap_or(100).min(500);
+    tauri::async_runtime::spawn_blocking(move || app.state::<Sessions>().list(limit))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Give a saved session a title (as agent86's `/rename`). Returns the title kept.
+#[tauri::command]
+pub async fn rename_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    title: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Sessions>().rename(&session_id, &title)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Start a turn: a message (with its `@` mentions inlined), a skill, or a specialist.

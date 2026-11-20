@@ -12,10 +12,12 @@
 //! exactly, and this file is the only place that touches them for configuration.
 
 use agent86_core::config::{load_config, Config, ConfigPaths, Overrides, ProjectTrust};
+use agent86_core::memory::embeddings::build_embedder;
 use agent86_core::provider::capabilities::context_window_for;
 use agent86_core::provider::provider_for_ref;
-use agent86_core::sdk::{Provider, SubAgents};
+use agent86_core::sdk::{Memory, Provider, SubAgents};
 use agent86_core::types::ModelRef;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -77,7 +79,7 @@ pub fn source_label(config: &Config) -> String {
 }
 
 /// The user's home directory, as agent86 finds it.
-fn home() -> Option<PathBuf> {
+pub fn home() -> Option<PathBuf> {
     ConfigPaths::discover()
         .user
         .and_then(|config| config.parent()?.parent().map(PathBuf::from))
@@ -123,4 +125,43 @@ pub fn subagents(config: &Config) -> Option<SubAgents> {
         subagents = subagents.specialists_dir(dir);
     }
     Some(subagents)
+}
+
+/// The memory database the CLI uses, opened as the CLI opens it: `[memory] path`, its embedder
+/// (`[memory] embeddings`, so episodes and facts stay findable from both), and its retention.
+/// Returns the memory and agent86's note when the embedder fell back (a model not downloaded).
+pub fn open_memory(config: &Config) -> Result<(Memory, PathBuf, Option<String>), String> {
+    let memory = &config.memory;
+    if !memory.enabled {
+        return Err(
+            "Memory is turned off ([memory] enabled = false in your agent86 config).".into(),
+        );
+    }
+    let path = agent86_core::session::expand_home(&memory.path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("{}: {error}", parent.display()))?;
+    }
+    let (embedder, note) = build_embedder(&memory.embeddings, memory.hf_offline);
+    let opened = Memory::open_with(&path, embedder)
+        .map_err(|error| error.to_string())?
+        .retention(
+            memory.retention_max_episodes,
+            memory.retention_max_sessions,
+            memory.retention_max_age_days,
+        );
+    Ok((opened, path, note))
+}
+
+/// The workspace agent86's editor server recorded for each session it ran
+/// (`~/.agent86/acp-sessions.json`: session id to folder). Read only, as a hint for reopening a
+/// session the app did not start; never written.
+pub fn acp_session_workspaces() -> HashMap<String, String> {
+    let Some(path) = home().map(|home| home.join(".agent86").join("acp-sessions.json")) else {
+        return HashMap::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }

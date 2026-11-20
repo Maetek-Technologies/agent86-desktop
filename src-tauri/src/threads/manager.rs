@@ -1,6 +1,7 @@
 //! The app's threads, by id, with the workspace each one runs in.
 
 use super::actor::{Capabilities, EventSink, MakeBuilder, ThreadHandle};
+use super::history::HistoryItem;
 use super::questions::Answer;
 use crate::workspace_files;
 use agent86_core::sdk::Turn;
@@ -13,6 +14,19 @@ use ts_rs::TS;
 
 /// The most files one `@` search returns.
 const FIND_LIMIT: usize = 50;
+
+/// The most threads open at once (agent86-web's `--max-agents` default). Each holds an agent and
+/// an OS thread; closing a tab frees one.
+pub const MAX_THREADS: usize = 8;
+
+/// A thread just opened.
+#[derive(Debug)]
+pub struct Opened {
+    pub id: String,
+    pub capabilities: Capabilities,
+    pub session_id: String,
+    pub history: Vec<HistoryItem>,
+}
 
 /// One turn, as the UI asks for it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
@@ -49,16 +63,34 @@ pub struct ThreadManager {
 }
 
 impl ThreadManager {
-    /// Start a thread in `workspace` and return its id and what its agent offers.
+    /// Start a thread in `workspace`, continuing session `resume` if given. Refused when
+    /// [`MAX_THREADS`] are open, or when that session is already open in another thread (two
+    /// agents saving one session would overwrite each other).
     pub fn open(
         &self,
         make: MakeBuilder,
         sink: EventSink,
         workspace: PathBuf,
         mention_max_bytes: u64,
-    ) -> Result<(String, Capabilities), String> {
+        resume: Option<&str>,
+    ) -> Result<Opened, String> {
+        {
+            let threads = self.lock();
+            if threads.len() >= MAX_THREADS {
+                return Err(format!(
+                    "{MAX_THREADS} threads are open, the most at once. Close one first."
+                ));
+            }
+            if let Some(id) = resume {
+                if threads.values().any(|t| t.handle.session_id() == id) {
+                    return Err("That session is already open in another tab.".into());
+                }
+            }
+        }
         let handle = ThreadHandle::spawn(make, sink)?;
         let capabilities = handle.capabilities().clone();
+        let session_id = handle.session_id().to_owned();
+        let history = handle.take_history();
         let id = format!("t{}", self.next_id.fetch_add(1, Ordering::SeqCst) + 1);
         self.lock().insert(
             id.clone(),
@@ -68,7 +100,12 @@ impl ThreadManager {
                 mention_max_bytes,
             },
         );
-        Ok((id, capabilities))
+        Ok(Opened {
+            id,
+            capabilities,
+            session_id,
+            history,
+        })
     }
 
     pub fn prompt(&self, id: &str, request: TurnRequest) -> Result<(), String> {

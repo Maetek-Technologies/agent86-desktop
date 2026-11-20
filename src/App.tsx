@@ -1,31 +1,51 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   answer,
   appInfo,
   cancelTurn,
   closeThread,
   findFiles,
+  listSessions,
   modelInfo,
   openThread,
   pickWorkspace,
   prompt,
+  renameSession,
   type AppInfo,
   type ModelInfo,
-  type OpenedThread,
+  type SessionList,
 } from "./desktop-client/backend.ts";
 import { listItems, parseCommand } from "./desktop-client/commands.ts";
-import type { Answer } from "./desktop-client/events.ts";
-import { initialState, reduce } from "./desktop-client/session-state.ts";
+import type { Answer, DesktopEvent, SessionSummary } from "./desktop-client/events.ts";
+import type { LocalAction } from "./desktop-client/session-state.ts";
+import { Sidebar } from "./shell/Sidebar.tsx";
+import { Tabs } from "./shell/Tabs.tsx";
+import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
 import { ThreadView } from "./thread/ThreadView.tsx";
 
-// One thread at a time for now. Tabs and the session list arrive in M4.
+let nextKey = 0;
+
+/**
+ * The app: saved sessions on the left, open threads as tabs, and each thread's view. Threads run
+ * in parallel; each tab's view stays mounted while hidden, so its draft and scroll survive.
+ */
 export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [model, setModel] = useState<ModelInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionList | null>(null);
   const [opening, setOpening] = useState(false);
-  const [thread, setThread] = useState<OpenedThread | null>(null);
-  const [state, dispatch] = useReducer(reduce, undefined, initialState);
+  const [state, dispatch] = useReducer(tabsReduce, NO_TABS);
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  const refreshSessions = useCallback(() => {
+    listSessions().then(setSessions, (e: unknown) =>
+      setSessions({ sessions: [], database: null, problem: String(e), note: null }),
+    );
+  }, []);
 
   useEffect(() => {
     appInfo().then(setInfo, (e: unknown) => setError(`Could not reach the app core: ${String(e)}`));
@@ -33,94 +53,229 @@ export function App() {
     modelInfo().then(setModel, (e: unknown) =>
       setError((shown) => shown ?? `Could not load the model settings: ${String(e)}`),
     );
-  }, []);
+    refreshSessions();
+  }, [refreshSessions]);
 
-  const start = async () => {
+  const titles = useMemo(
+    () => new Map(sessions?.sessions.map((s) => [s.id, s.title]) ?? []),
+    [sessions],
+  );
+  const titleOf = useCallback(
+    (tab: Tab) =>
+      tab.title ??
+      (tab.opened ? titles.get(tab.opened.sessionId) : null) ??
+      folderName(tab.workspace),
+    [titles],
+  );
+  const openSessions = useMemo(
+    () => new Set(state.tabs.flatMap((t) => (t.opened ? [t.opened.sessionId] : []))),
+    [state.tabs],
+  );
+
+  /** Open a thread in `workspace` (continuing `session` if given) in a new tab. */
+  const open = useCallback(
+    async (workspace: string, session: SessionSummary | null) => {
+      const key = `tab${++nextKey}`;
+      dispatch({ type: "opening", key, workspace, title: session?.title ?? null });
+      setOpening(true);
+      setError(null);
+      try {
+        const onEvent = (event: DesktopEvent) => {
+          dispatch({ type: "thread", key, action: event });
+          // A finished turn may have saved a new session or titled one.
+          if (event.type === "turnEnded" || event.type === "turnFailed") refreshSessions();
+        };
+        const opened = await openThread(workspace, session?.id ?? null, onEvent);
+        dispatch({ type: "opened", key, opened });
+      } catch (e) {
+        dispatch({ type: "failed", key });
+        setError(String(e));
+      } finally {
+        setOpening(false);
+      }
+    },
+    [refreshSessions],
+  );
+
+  const newThread = useCallback(async () => {
     setError(null);
     try {
       const workspace = await pickWorkspace();
-      if (!workspace) return;
-      setOpening(true);
-      dispatch({ type: "local/reset" });
-      setThread(await openThread(workspace, dispatch));
+      if (workspace) await open(workspace, null);
     } catch (e) {
       setError(String(e));
-    } finally {
-      setOpening(false);
     }
-  };
+  }, [open]);
+
+  const reopen = useCallback(
+    async (session: SessionSummary) => {
+      const already = stateRef.current.tabs.find((t) => t.opened?.sessionId === session.id);
+      if (already) {
+        dispatch({ type: "activate", key: already.key });
+        return;
+      }
+      try {
+        // agent86 does not record a session's folder; ask when the app does not know it.
+        const workspace = session.workspace ?? (await pickWorkspace());
+        if (workspace) await open(workspace, session);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [open],
+  );
+
+  const close = useCallback((key: string) => {
+    const tab = stateRef.current.tabs.find((t) => t.key === key);
+    if (tab?.opened) void closeThread(tab.opened.threadId).catch(() => {});
+    dispatch({ type: "close", key });
+  }, []);
+
+  const rename = useCallback(
+    (key: string, title: string) => {
+      const tab = stateRef.current.tabs.find((t) => t.key === key);
+      if (!tab?.opened) return;
+      renameSession(tab.opened.sessionId, title).then(
+        (kept) => {
+          dispatch({ type: "title", key, title: kept });
+          refreshSessions();
+        },
+        (e: unknown) =>
+          dispatch({ type: "thread", key, action: { type: "local/warning", text: String(e) } }),
+      );
+    },
+    [refreshSessions],
+  );
+
+  return (
+    <div className="flex h-screen bg-bg text-text">
+      <Sidebar
+        list={sessions}
+        openSessions={openSessions}
+        busy={opening || !model || !!model.problem}
+        onNew={() => void newThread()}
+        onOpen={(session) => void reopen(session)}
+        onRefresh={refreshSessions}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {state.tabs.length > 0 && (
+          <Tabs
+            tabs={state.tabs}
+            active={state.active}
+            titleOf={titleOf}
+            onActivate={(key) => dispatch({ type: "activate", key })}
+            onClose={close}
+            onRename={rename}
+          />
+        )}
+        {error && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 border-b border-error bg-panel px-4 py-2 text-sm text-error"
+          >
+            <span className="flex-1">{error}</span>
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        )}
+        <div className="relative min-h-0 flex-1">
+          {state.tabs.map((tab) => (
+            <div key={tab.key} className="absolute inset-0" hidden={tab.key !== state.active}>
+              {tab.opened ? (
+                <TabView tab={tab} dispatchTab={dispatch} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted">
+                  Opening {folderName(tab.workspace)}…
+                </div>
+              )}
+            </div>
+          ))}
+          {state.tabs.length === 0 && (
+            <Start info={info} model={model} opening={opening} onNew={() => void newThread()} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One open thread, with its commands bound to it. */
+function TabView({ tab, dispatchTab }: { tab: Tab; dispatchTab: (action: TabsAction) => void }) {
+  const opened = tab.opened!;
+  const key = tab.key;
+  const local = useCallback(
+    (action: DesktopEvent | LocalAction) => dispatchTab({ type: "thread", key, action }),
+    [dispatchTab, key],
+  );
 
   const send = useCallback(
     (text: string, mentions: string[]) => {
-      if (!thread) return;
-      const command = parseCommand(text, thread.capabilities, mentions);
+      const command = parseCommand(text, opened.capabilities, mentions);
       switch (command.type) {
         case "list": {
-          const items = listItems(command.list, thread.capabilities);
-          dispatch({ type: "local/list", title: `/${command.list} (${items.length})`, items });
+          const items = listItems(command.list, opened.capabilities);
+          local({ type: "local/list", title: `/${command.list} (${items.length})`, items });
           return;
         }
         case "error":
-          dispatch({ type: "local/warning", text: command.message });
+          local({ type: "local/warning", text: command.message });
           return;
         case "turn":
-          dispatch({ type: "local/prompt", text: command.display });
-          prompt(thread.threadId, command.turn).catch((e: unknown) =>
-            dispatch({ type: "local/error", text: String(e) }),
+          local({ type: "local/prompt", text: command.display });
+          prompt(opened.threadId, command.turn).catch((e: unknown) =>
+            local({ type: "local/error", text: String(e) }),
           );
       }
     },
-    [thread],
-  );
-
-  const searchFiles = useCallback(
-    (query: string) => (thread ? findFiles(thread.threadId, query) : Promise.resolve([])),
-    [thread],
+    [opened, local],
   );
 
   const stop = useCallback(() => {
-    if (!thread) return;
-    dispatch({ type: "local/cancelling" });
-    cancelTurn(thread.threadId).catch((e: unknown) =>
-      dispatch({ type: "local/error", text: String(e) }),
+    local({ type: "local/cancelling" });
+    cancelTurn(opened.threadId).catch((e: unknown) =>
+      local({ type: "local/error", text: String(e) }),
     );
-  }, [thread]);
+  }, [opened, local]);
 
   const reply = useCallback(
     (qid: number, given: Answer) => {
-      if (!thread) return;
-      answer(thread.threadId, qid, given).catch((e: unknown) =>
-        dispatch({ type: "local/warning", text: String(e) }),
+      answer(opened.threadId, qid, given).catch((e: unknown) =>
+        local({ type: "local/warning", text: String(e) }),
       );
     },
-    [thread],
+    [opened, local],
   );
 
-  const close = useCallback(() => {
-    if (thread) void closeThread(thread.threadId).catch(() => {});
-    setThread(null);
-    dispatch({ type: "local/reset" });
-  }, [thread]);
-
-  if (thread) {
-    return (
-      <ThreadView
-        thread={thread}
-        state={state}
-        onSend={send}
-        onStop={stop}
-        onAnswer={reply}
-        findFiles={searchFiles}
-        onClose={close}
-      />
-    );
-  }
+  const searchFiles = useCallback((query: string) => findFiles(opened.threadId, query), [opened]);
 
   return (
-    <main className="flex h-screen flex-col items-center justify-center gap-5 bg-bg px-6 text-text">
+    <ThreadView
+      thread={opened}
+      state={tab.session}
+      onSend={send}
+      onStop={stop}
+      onAnswer={reply}
+      findFiles={searchFiles}
+    />
+  );
+}
+
+function Start({
+  info,
+  model,
+  opening,
+  onNew,
+}: {
+  info: AppInfo | null;
+  model: ModelInfo | null;
+  opening: boolean;
+  onNew: () => void;
+}) {
+  return (
+    <main className="flex h-full flex-col items-center justify-center gap-5 px-6">
       <img src="/agent86-logo.png" alt="" width={96} height={96} />
       <h1 className="text-2xl font-semibold">Agent 86</h1>
-
       {model && (
         <div className="max-w-xl text-center text-sm">
           <div>
@@ -134,18 +289,15 @@ export function App() {
           )}
         </div>
       )}
-
       <button
         type="button"
         className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-bg disabled:opacity-50"
-        onClick={() => void start()}
+        onClick={onNew}
         disabled={opening || !model || !!model.problem}
       >
         {opening ? "Starting…" : "Choose a workspace folder…"}
       </button>
-
-      {error && <p className="max-w-xl text-center text-sm text-error">{error}</p>}
-
+      <p className="text-xs text-muted">or reopen a saved session from the list.</p>
       {info && (
         <footer className="absolute bottom-3 text-xs text-muted">
           v{info.appVersion} · agent86-core v{info.coreVersion} · {info.os}/{info.arch}

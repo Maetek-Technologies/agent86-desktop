@@ -18,10 +18,9 @@ interface Props {
   onStop: () => void;
   onAnswer: (qid: number, answer: Answer) => void;
   findFiles: (query: string) => Promise<string[]>;
-  onClose: () => void;
 }
 
-export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles, onClose }: Props) {
+export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles }: Props) {
   const bottom = useRef<HTMLDivElement>(null);
   const last = state.entries.at(-1);
   const lastLength = last && "text" in last ? last.text.length : 0;
@@ -36,7 +35,7 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles,
 
   return (
     <ThreadContext.Provider value={{ cwd: thread.workspace }}>
-      <div className="relative flex h-screen flex-col bg-bg text-text">
+      <div className="relative flex h-full flex-col bg-bg text-text">
         <header className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2 text-sm">
           <span className="min-w-0 flex-1 truncate font-mono" title={thread.workspace}>
             {thread.workspace}
@@ -47,14 +46,15 @@ export function ThreadView({ thread, state, onSend, onStop, onAnswer, findFiles,
             session={state.usage}
             contextWindow={thread.contextWindow}
           />
-          <button
-            type="button"
-            className="rounded px-2 py-0.5 text-xs text-muted hover:bg-panel-2 hover:text-text"
-            onClick={onClose}
-          >
-            Close
-          </button>
         </header>
+        {thread.memoryNote && (
+          <div
+            className="border-b border-border bg-panel-2 px-4 py-1 text-xs text-warn"
+            role="note"
+          >
+            {thread.memoryNote}
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto px-4 py-3" aria-live="polite">
           <div className="mx-auto max-w-4xl">
             {state.entries.length === 0 && <Welcome thread={thread} />}

@@ -1,7 +1,14 @@
 // A thread's transcript as plain state, and the pure function that folds Rust's events into it.
 // React renders this; tests assert on it without a DOM. The entry shapes follow agent86-web's
 // acp-client session state so its components can be ported in M3.
-import type { ApprovalInfo, DesktopEvent, LimitInfo, TurnInfo, UsageInfo } from "./events.ts";
+import type {
+  ApprovalInfo,
+  DesktopEvent,
+  HistoryItem,
+  LimitInfo,
+  TurnInfo,
+  UsageInfo,
+} from "./events.ts";
 
 /** A file change shown as a diff: the whole file before (`null` when new) and after. */
 export interface FileDiff {
@@ -127,7 +134,9 @@ export type LocalAction =
   /** A problem that does not end the turn, such as an answer Rust refused. */
   | { type: "local/warning"; text: string }
   | { type: "local/reset" }
-  | { type: "local/list"; title: string; items: string[] };
+  | { type: "local/list"; title: string; items: string[] }
+  /** A reopened session's conversation, shown before anything new. */
+  | { type: "local/history"; items: HistoryItem[] };
 
 export function reduce(state: SessionState, action: DesktopEvent | LocalAction): SessionState {
   switch (action.type) {
@@ -147,6 +156,8 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         id,
         text: action.text,
       }));
+    case "local/history":
+      return action.items.reduce(pushHistory, state);
     case "local/list":
       return push(state, (id) => ({ kind: "list", id, title: action.title, items: action.items }));
     case "local/warning":
@@ -303,4 +314,25 @@ function closeQuestion(state: SessionState, qid: number): SessionState {
         : entry,
     ),
   };
+}
+
+function pushHistory(state: SessionState, item: HistoryItem): SessionState {
+  switch (item.kind) {
+    case "user":
+      return push(state, (id) => ({ kind: "user", id, text: item.text }));
+    case "agent":
+      return push(state, (id) => ({ kind: "agent", id, text: item.text }));
+    case "tool":
+      return push(state, (id) => ({
+        kind: "tool",
+        id,
+        toolCallId: item.id,
+        name: item.name,
+        title: item.name,
+        arguments: item.arguments,
+        status: item.ok ? "completed" : "failed",
+        ...(item.output === null ? {} : { output: item.output }),
+        ...(item.ok ? {} : { error: null }),
+      }));
+  }
 }

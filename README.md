@@ -5,11 +5,12 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M3.** One thread runs real turns with streamed answers, thinking, tool cards with
-> diffs, approvals, limit raises, secret prompts, `/` commands (skills, specialists, and the
-> `/tools`, `/skills`, `/agents` lists), `@` file mentions, prompt history, and a context meter.
-> The model, its key, skills, and specialists come from your agent86 CLI setup (`~/.agent86`)
-> until the app has settings of its own (M5). The plan and milestones are in
+> **Status: M4.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
+> with diffs, approvals, limit raises, secret prompts, `/` commands, `@` file mentions, and a
+> context meter. Sessions are saved to the memory database the agent86 CLI uses
+> (`~/.agent86/memory.db`), listed in the sidebar, and can be reopened and renamed. The model,
+> its key, skills, and specialists come from your agent86 CLI setup until the app has settings
+> of its own (M5). The plan and milestones are in
 > [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Prerequisites

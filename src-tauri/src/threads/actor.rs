@@ -12,11 +12,12 @@
 //! [`ThreadHandle::prompt`] and that point; a watcher running beside the turn re-applies it.
 
 use super::events::{DesktopEvent, StopReason, TurnInfo, UsageInfo};
+use super::history::{self, HistoryItem};
 use super::questions::{Answer, Questions};
 use agent86_core::sdk::{AgentBuilder, CancelToken, Turn};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use ts_rs::TS;
 
@@ -47,6 +48,14 @@ pub struct Capabilities {
     pub tools: Vec<String>,
 }
 
+/// What the actor reports once its agent is built.
+struct Started {
+    cancel: CancelToken,
+    capabilities: Capabilities,
+    session_id: String,
+    history: Vec<HistoryItem>,
+}
+
 /// State the handle and the actor share.
 struct Shared {
     busy: AtomicBool,
@@ -61,6 +70,9 @@ pub struct ThreadHandle {
     shared: Arc<Shared>,
     questions: Arc<Questions>,
     capabilities: Capabilities,
+    session_id: String,
+    /// The reopened session's conversation; taken once by whoever opened the thread.
+    history: Mutex<Vec<HistoryItem>>,
 }
 
 impl ThreadHandle {
@@ -68,7 +80,7 @@ impl ThreadHandle {
     /// error (a bad workspace, an MCP server that would not start).
     pub fn spawn(make: MakeBuilder, sink: EventSink) -> Result<Self, String> {
         let (commands, inbox) = mpsc::channel::<Command>();
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<(CancelToken, Capabilities), String>>();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<Started, String>>();
         let shared = Arc::new(Shared {
             busy: AtomicBool::new(false),
             cancel_requested: Arc::new(AtomicBool::new(false)),
@@ -116,7 +128,13 @@ impl ThreadHandle {
                     specialists: agent.specialists(),
                     tools: agent.tool_names(),
                 };
-                if ready_tx.send(Ok((cancel.clone(), capabilities))).is_err() {
+                let started = Started {
+                    cancel: cancel.clone(),
+                    capabilities,
+                    session_id: agent.session_id().to_owned(),
+                    history: history::from_conversation(agent.conversation()),
+                };
+                if ready_tx.send(Ok(started)).is_err() {
                     return;
                 }
 
@@ -178,20 +196,37 @@ impl ThreadHandle {
             })
             .map_err(|error| format!("could not start a thread: {error}"))?;
 
-        let (cancel, capabilities) = ready_rx
+        let started = ready_rx
             .recv()
             .map_err(|_| "the thread stopped while starting".to_owned())??;
         Ok(Self {
             commands,
-            cancel,
+            cancel: started.cancel,
             shared,
             questions,
-            capabilities,
+            capabilities: started.capabilities,
+            session_id: started.session_id,
+            history: Mutex::new(started.history),
         })
     }
 
     pub fn capabilities(&self) -> &Capabilities {
         &self.capabilities
+    }
+
+    /// The agent86 session this thread continues (or started).
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// The reopened session's conversation, once; empty for a new session.
+    pub fn take_history(&self) -> Vec<HistoryItem> {
+        std::mem::take(
+            &mut self
+                .history
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
     }
 
     /// Start a turn. Refused while one is running: agent86 runs one turn at a time per agent.

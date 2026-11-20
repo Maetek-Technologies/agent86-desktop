@@ -2,6 +2,7 @@
 
 pub mod actor;
 pub mod events;
+pub mod history;
 pub mod manager;
 pub mod questions;
 

@@ -611,3 +611,131 @@ fn capabilities_list_skills_and_tools_and_a_skill_runs_directly() {
         other => panic!("expected a failed turn, got {other:?}"),
     }
 }
+
+fn memory_thread(
+    replies: Vec<Reply>,
+    workspace: &Path,
+    memory: agent86_core::sdk::Memory,
+    resume: Option<String>,
+) -> Harness {
+    let provider: Arc<dyn Provider> = Scripted::new(replies);
+    let workspace = workspace.to_owned();
+    let (tx, events) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let thread = ThreadHandle::spawn(
+        Box::new(move || {
+            let builder = Agent::builder()
+                .provider(provider)
+                .workspace(workspace)
+                .builtins(Builtins::ReadOnly)
+                .memory(memory);
+            Ok(match resume {
+                Some(id) => builder.session(id),
+                None => builder,
+            })
+        }),
+        Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
+        }),
+    )
+    .unwrap();
+    Harness { thread, events }
+}
+
+#[test]
+fn a_saved_session_reopens_with_its_conversation() {
+    use super::history::HistoryItem;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "hi").unwrap();
+    let memory = agent86_core::sdk::Memory::in_memory().unwrap();
+
+    let first = memory_thread(
+        vec![
+            Reply::Tool("list_dir", json!({"path": "."})),
+            Reply::Text("There is notes.txt."),
+        ],
+        dir.path(),
+        memory.clone(),
+        None,
+    );
+    assert!(first.thread.take_history().is_empty());
+    first
+        .thread
+        .prompt("what is here?\n\n<file path=\"x\">\ninlined\n</file>")
+        .unwrap();
+    first.until_end();
+    let id = first.thread.session_id().to_owned();
+    drop(first);
+
+    // The CLI's own list sees it, titled from the first message.
+    let listed = memory.store().recent_sessions(10).unwrap();
+    assert!(listed.iter().any(|s| s.session_id == id));
+
+    let again = memory_thread(vec![], dir.path(), memory.clone(), Some(id.clone()));
+    assert_eq!(again.thread.session_id(), id);
+    let history = again.thread.take_history();
+    assert_eq!(
+        history.first(),
+        Some(&HistoryItem::User {
+            text: "what is here?".into()
+        })
+    );
+    match &history[1] {
+        HistoryItem::Tool {
+            name, output, ok, ..
+        } => {
+            assert_eq!(name, "list_dir");
+            assert!(output.as_deref().unwrap_or("").contains("notes.txt"));
+            assert!(ok);
+        }
+        other => panic!("expected the tool call, got {other:?}"),
+    }
+    assert_eq!(
+        history.last(),
+        Some(&HistoryItem::Agent {
+            text: "There is notes.txt.".into()
+        })
+    );
+    // Taken once.
+    assert!(again.thread.take_history().is_empty());
+}
+
+#[test]
+fn the_manager_refuses_a_session_open_twice_and_too_many_threads() {
+    use super::manager::{ThreadManager, MAX_THREADS};
+    let dir = tempfile::tempdir().unwrap();
+    let memory = agent86_core::sdk::Memory::in_memory().unwrap();
+    let threads = ThreadManager::default();
+    let open = |resume: Option<String>| {
+        let provider: Arc<dyn Provider> = Scripted::new(vec![Reply::Text("ok")]);
+        let workspace = dir.path().to_owned();
+        let memory = memory.clone();
+        let resume_for_builder = resume.clone();
+        threads.open(
+            Box::new(move || {
+                let builder = Agent::builder()
+                    .provider(provider)
+                    .workspace(workspace)
+                    .builtins(Builtins::ReadOnly)
+                    .memory(memory);
+                Ok(match resume_for_builder {
+                    Some(id) => builder.session(id),
+                    None => builder,
+                })
+            }),
+            Arc::new(|_| {}),
+            dir.path().to_owned(),
+            0,
+            resume.as_deref(),
+        )
+    };
+    let first = open(None).unwrap();
+    let again = open(Some(first.session_id.clone()));
+    assert!(again.unwrap_err().contains("already open"));
+    for _ in 1..MAX_THREADS {
+        open(None).unwrap();
+    }
+    assert!(open(None).unwrap_err().contains("Close one first"));
+    threads.close(&first.id).unwrap();
+    assert!(open(None).is_ok());
+}

@@ -8,10 +8,11 @@ import type {
   DesktopEvent,
   ModelInfo,
   OpenedThread,
+  SessionList,
   TurnRequest,
 } from "./events.ts";
 
-export type { AppInfo, ModelInfo, OpenedThread } from "./events.ts";
+export type { AppInfo, ModelInfo, OpenedThread, SessionList } from "./events.ts";
 
 export function appInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
@@ -27,14 +28,28 @@ export function pickWorkspace(): Promise<string | null> {
   return invoke<string | null>("pick_workspace");
 }
 
-/** Start a thread in `workspace`; `onEvent` hears everything it streams, for its whole life. */
+/**
+ * Start a thread in `workspace`, continuing saved session `sessionId` if given; `onEvent` hears
+ * everything it streams, for its whole life.
+ */
 export function openThread(
   workspace: string,
+  sessionId: string | null,
   onEvent: (event: DesktopEvent) => void,
 ): Promise<OpenedThread> {
   const channel = new Channel<DesktopEvent>();
   channel.onmessage = onEvent;
-  return invoke<OpenedThread>("open_thread", { workspace, onEvent: channel });
+  return invoke<OpenedThread>("open_thread", { workspace, sessionId, onEvent: channel });
+}
+
+/** Recent saved sessions, newest first, from the memory database shared with the agent86 CLI. */
+export function listSessions(limit = 100): Promise<SessionList> {
+  return invoke<SessionList>("list_sessions", { limit });
+}
+
+/** Give a saved session a title (as agent86's `/rename`). Resolves to the title kept. */
+export function renameSession(sessionId: string, title: string): Promise<string> {
+  return invoke<string>("rename_session", { sessionId, title });
 }
 
 /** Start a turn: a message (its `@` mentions inlined by Rust), a skill, or a specialist. */
