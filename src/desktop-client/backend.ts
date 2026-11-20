@@ -6,21 +6,70 @@ import type {
   Answer,
   AppInfo,
   DesktopEvent,
+  ImportPreview,
+  KeyStatus,
   ModelInfo,
   OpenedThread,
+  ProviderSettings,
   SessionList,
+  Settings,
+  SettingsState,
   TurnRequest,
 } from "./events.ts";
 
-export type { AppInfo, ModelInfo, OpenedThread, SessionList } from "./events.ts";
+export type {
+  AppInfo,
+  ImportPreview,
+  KeyStatus,
+  ModelInfo,
+  OpenedThread,
+  SessionList,
+  Settings,
+  SettingsState,
+} from "./events.ts";
 
 export function appInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
-/** The model new threads use (until M5: the agent86 CLI's default model and keys). */
+/** The model new threads use, from the app's settings, and why it cannot start, if it cannot. */
 export function modelInfo(): Promise<ModelInfo> {
   return invoke<ModelInfo>("model_info");
+}
+
+/** The settings (`null` before setup), where they live, and the CLI config that could be imported. */
+export function getSettings(): Promise<SettingsState> {
+  return invoke<SettingsState>("get_settings");
+}
+
+/** Check and keep `settings`. Rejects with every problem found, one per line. */
+export function saveSettings(settings: Settings): Promise<Settings> {
+  return invoke<Settings>("save_settings", { settings });
+}
+
+/** What importing the agent86 CLI's `~/.agent86/config.toml` would give; nothing is kept yet. */
+export function previewCliImport(): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_cli_import");
+}
+
+/** Where each provider's API key comes from (never the key itself). */
+export function keyStatuses(providers: Record<string, ProviderSettings>): Promise<KeyStatus[]> {
+  return invoke<KeyStatus[]>("key_statuses", { providers });
+}
+
+/** Store `provider`'s API key in the OS keyring, where `agent86 keys set` keeps it. */
+export function setKey(provider: string, key: string): Promise<void> {
+  return invoke("set_key", { provider, key });
+}
+
+/** Remove `provider`'s key from the OS keyring. Resolves to whether there was one. */
+export function deleteKey(provider: string): Promise<boolean> {
+  return invoke<boolean>("delete_key", { provider });
+}
+
+/** Send `reference` a one-line request with `settings` (saved or not). Resolves to what it said. */
+export function testModel(settings: Settings, reference: string): Promise<string> {
+  return invoke<string>("test_model", { settings, reference });
 }
 
 /** The native folder picker. `null` when the user cancels. */

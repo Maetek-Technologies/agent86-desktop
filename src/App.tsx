@@ -5,6 +5,7 @@ import {
   cancelTurn,
   closeThread,
   findFiles,
+  getSettings,
   listSessions,
   modelInfo,
   openThread,
@@ -14,6 +15,8 @@ import {
   type AppInfo,
   type ModelInfo,
   type SessionList,
+  type Settings,
+  type SettingsState,
 } from "./desktop-client/backend.ts";
 import { listItems, parseCommand } from "./desktop-client/commands.ts";
 import type { Answer, DesktopEvent, SessionSummary } from "./desktop-client/events.ts";
@@ -21,6 +24,8 @@ import type { LocalAction } from "./desktop-client/session-state.ts";
 import { Sidebar } from "./shell/Sidebar.tsx";
 import { Tabs } from "./shell/Tabs.tsx";
 import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
+import { FirstRun } from "./settings/FirstRun.tsx";
+import { SettingsView } from "./settings/SettingsView.tsx";
 import { ThreadView } from "./thread/ThreadView.tsx";
 
 let nextKey = 0;
@@ -34,6 +39,8 @@ export function App() {
   const [model, setModel] = useState<ModelInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionList | null>(null);
+  const [settingsState, setSettingsState] = useState<SettingsState | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [opening, setOpening] = useState(false);
   const [state, dispatch] = useReducer(tabsReduce, NO_TABS);
   const stateRef = useRef(state);
@@ -47,14 +54,42 @@ export function App() {
     );
   }, []);
 
-  useEffect(() => {
-    appInfo().then(setInfo, (e: unknown) => setError(`Could not reach the app core: ${String(e)}`));
-    // An unreachable core says more than a config error, so the config error never replaces it.
+  const refreshModel = useCallback(() => {
+    // An unreachable core says more than a settings error, so that error never replaces it.
     modelInfo().then(setModel, (e: unknown) =>
       setError((shown) => shown ?? `Could not load the model settings: ${String(e)}`),
     );
+  }, []);
+
+  useEffect(() => {
+    appInfo().then(setInfo, (e: unknown) => setError(`Could not reach the app core: ${String(e)}`));
+    getSettings().then(setSettingsState, (e: unknown) =>
+      setError((shown) => shown ?? `Could not load the settings: ${String(e)}`),
+    );
+    refreshModel();
     refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshModel, refreshSessions]);
+
+  /** Settings were saved (or set up): new threads use them. */
+  const settingsSaved = useCallback(
+    (settings: Settings) => {
+      setSettingsState((state) => state && { ...state, settings, problem: null });
+      refreshModel();
+      refreshSessions();
+    },
+    [refreshModel, refreshSessions],
+  );
+
+  const openSettings = useCallback(() => {
+    // Fresh: whether the memory database is open, and whether a CLI config appeared.
+    getSettings().then(
+      (state) => {
+        setSettingsState(state);
+        setShowSettings(true);
+      },
+      (e: unknown) => setError(String(e)),
+    );
+  }, []);
 
   const titles = useMemo(
     () => new Map(sessions?.sessions.map((s) => [s.id, s.title]) ?? []),
@@ -147,6 +182,17 @@ export function App() {
     [refreshSessions],
   );
 
+  if (settingsState && !settingsState.settings) {
+    return (
+      <div className="h-screen bg-bg text-text">
+        <FirstRun state={settingsState} onDone={settingsSaved} />
+      </div>
+    );
+  }
+  const ready = settingsState?.settings
+    ? { ...settingsState, settings: settingsState.settings }
+    : null;
+
   return (
     <div className="flex h-screen bg-bg text-text">
       <Sidebar
@@ -156,6 +202,8 @@ export function App() {
         onNew={() => void newThread()}
         onOpen={(session) => void reopen(session)}
         onRefresh={refreshSessions}
+        onSettings={() => (showSettings ? setShowSettings(false) : openSettings())}
+        settingsOpen={showSettings}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {state.tabs.length > 0 && (
@@ -192,7 +240,22 @@ export function App() {
             </div>
           ))}
           {state.tabs.length === 0 && (
-            <Start info={info} model={model} opening={opening} onNew={() => void newThread()} />
+            <Start
+              info={info}
+              model={model}
+              opening={opening}
+              onNew={() => void newThread()}
+              onSettings={openSettings}
+            />
+          )}
+          {showSettings && ready && (
+            <div className="absolute inset-0 z-10">
+              <SettingsView
+                state={ready}
+                onSaved={settingsSaved}
+                onClose={() => setShowSettings(false)}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -266,11 +329,13 @@ function Start({
   model,
   opening,
   onNew,
+  onSettings,
 }: {
   info: AppInfo | null;
   model: ModelInfo | null;
   opening: boolean;
   onNew: () => void;
+  onSettings: () => void;
 }) {
   return (
     <main className="flex h-full flex-col items-center justify-center gap-5 px-6">
@@ -278,10 +343,19 @@ function Start({
       <h1 className="text-2xl font-semibold">Agent 86</h1>
       {model && (
         <div className="max-w-xl text-center text-sm">
-          <div>
-            Model <span className="font-mono">{model.reference}</span>
-          </div>
-          <div className="text-xs text-muted">from {model.source}</div>
+          {model.reference && (
+            <div>
+              {model.triage ? "Triage, frontier model " : "Model "}
+              <span className="font-mono">{model.reference}</span>
+            </div>
+          )}
+          <button
+            type="button"
+            className="text-xs text-muted underline hover:text-text"
+            onClick={onSettings}
+          >
+            Change in Settings
+          </button>
           {model.problem && (
             <p className="mt-2 rounded-md border border-error px-3 py-2 text-error">
               {model.problem}

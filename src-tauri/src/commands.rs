@@ -1,15 +1,20 @@
 //! Every command the WebView may call. Kept thin: validate, then hand off to the thread manager.
-//! Commands that touch the disk or the network are `async`, so they never run on the UI thread.
+//! Commands that touch the disk, the keyring, or the network are `async`, so they never run on the
+//! UI thread.
 
-use crate::cli_config;
+use crate::agent_factory;
+use crate::cli_import::{self, ImportPreview};
+use crate::keys::{self, KeyStatus, OsKeys};
 use crate::sessions::{SessionList, Sessions};
+use crate::settings::{self, ProviderPreset, ProviderSettings, Settings, SettingsStore};
 use crate::threads::actor::Capabilities;
 use crate::threads::history::HistoryItem;
 use crate::threads::manager::TurnRequest;
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
-use agent86_core::sdk::{Agent, ApprovalMode, Builtins, Memory};
+use agent86_core::sdk::Memory;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,35 +58,155 @@ fn build_info(app_version: String) -> AppInfo {
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
-    /// `provider:model`.
+    /// `provider:model`; empty before setup. Under triage, the frontier model.
     pub reference: String,
     #[ts(type = "number")]
     pub context_window: u64,
-    /// The config files the model came from.
-    pub source: String,
-    /// Why a thread cannot start with this model (no key, unknown provider), if it cannot.
+    /// Turns are routed between a cheap and a frontier model.
+    pub triage: bool,
+    /// Why a thread cannot start with these settings (not set up, no key), if it cannot.
     pub problem: Option<String>,
 }
 
-/// The model new threads will use (M1: the agent86 CLI's default model).
+/// The model new threads will use, from the app's settings.
 #[tauri::command]
-pub async fn model_info() -> Result<ModelInfo, String> {
-    let config = cli_config::load()?;
-    let source = cli_config::source_label(&config);
-    Ok(match cli_config::model_setup(&config) {
-        Ok(setup) => ModelInfo {
-            reference: setup.reference,
-            context_window: setup.context_window,
-            source,
-            problem: None,
-        },
-        Err(problem) => ModelInfo {
-            reference: config.model.default.clone(),
-            context_window: 0,
-            source,
-            problem: Some(problem),
-        },
-    })
+pub async fn model_info(app: tauri::AppHandle) -> Result<ModelInfo, String> {
+    // Keys are read from the keyring, which can block.
+    tauri::async_runtime::spawn_blocking(move || describe_model(&app.state::<SettingsStore>()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn describe_model(store: &SettingsStore) -> ModelInfo {
+    let settings = match store.require() {
+        Ok(settings) => settings,
+        Err(problem) => {
+            return ModelInfo {
+                reference: String::new(),
+                context_window: 0,
+                triage: false,
+                problem: Some(problem),
+            }
+        }
+    };
+    let triage = settings.model.triage.as_ref();
+    let reference = triage
+        .map(|t| t.frontier.trim().to_owned())
+        .unwrap_or_else(|| settings.model.default.trim().to_owned());
+    let mut refs = vec![settings.model.default.clone()];
+    if let Some(triage) = triage {
+        refs.extend([triage.cheap.clone(), triage.frontier.clone()]);
+    }
+    let problem = refs
+        .iter()
+        .find_map(|r| agent_factory::model(&settings, r, &OsKeys).err());
+    ModelInfo {
+        context_window: agent_factory::context_window(&settings, &reference),
+        reference,
+        triage: triage.is_some(),
+        problem,
+    }
+}
+
+/// The settings, the file they live in, and the CLI config that could be imported.
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsState {
+    /// `None` before setup (the first-run screen) or when the file is unreadable.
+    pub settings: Option<Settings>,
+    /// Why the settings file could not be read, if it could not.
+    pub problem: Option<String>,
+    /// Where the settings are kept.
+    pub path: Option<String>,
+    /// The agent86 CLI's config file, when there is one to import.
+    pub cli_config: Option<String>,
+    /// agent86's built-in providers, the starting points for adding one.
+    pub presets: Vec<ProviderPreset>,
+    /// Settings with every default and no model, for the first-run screen to start from.
+    pub defaults: Settings,
+    /// The memory database is already open, so memory settings apply after a restart.
+    pub memory_open: bool,
+}
+
+#[tauri::command]
+pub fn get_settings(app: tauri::AppHandle) -> SettingsState {
+    let store = app.state::<SettingsStore>();
+    let (settings, problem) = match store.get() {
+        Ok(settings) => (settings, None),
+        Err(problem) => (None, Some(problem)),
+    };
+    SettingsState {
+        settings,
+        problem,
+        path: store.path().map(|path| path.display().to_string()),
+        cli_config: cli_import::cli_config_path()
+            .filter(|path| path.is_file())
+            .map(|path| path.display().to_string()),
+        presets: settings::presets(),
+        defaults: Settings::default(),
+        memory_open: app.state::<Sessions>().memory_opened(),
+    }
+}
+
+/// Check and keep `settings`; threads opened from now on use them. Fails listing every problem.
+#[tauri::command]
+pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
+    app.state::<SettingsStore>().save(settings)
+}
+
+/// What importing the agent86 CLI's config would give. Nothing is kept until it is saved.
+#[tauri::command]
+pub async fn preview_cli_import() -> Result<ImportPreview, String> {
+    let path = cli_import::cli_config_path()
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "There is no agent86 CLI config (~/.agent86/config.toml).".to_owned())?;
+    tauri::async_runtime::spawn_blocking(move || cli_import::preview(&path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Where each provider's key comes from. `providers` may be unsaved (the settings being edited).
+#[tauri::command]
+pub async fn key_statuses(
+    providers: BTreeMap<String, ProviderSettings>,
+) -> Result<Vec<KeyStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || keys::statuses(&providers, &OsKeys))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Store an API key for `provider` in the OS keyring, where `agent86 keys set` keeps it.
+#[tauri::command]
+pub async fn set_key(provider: String, key: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || keys::set(&provider, &key))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Remove `provider`'s key from the OS keyring. Resolves to whether there was one.
+#[tauri::command]
+pub async fn delete_key(provider: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || keys::delete(&provider))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Send `reference` a one-line request with `settings` (which may be unsaved), to check the URL,
+/// the key, and the model name. Resolves to a short description of the reply.
+#[tauri::command]
+pub async fn test_model(settings: Settings, reference: String) -> Result<String, String> {
+    let test = async move {
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            agent_factory::test_model(&settings, &reference, &OsKeys),
+        )
+        .await
+        .unwrap_or_else(|_| Err("No answer within 60 seconds.".into()))
+    };
+    tauri::async_runtime::spawn(test)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Ask for a workspace folder with the native dialog. `None` when the user cancels.
@@ -141,16 +266,11 @@ fn open_thread_blocking(
     let threads = app.state::<ThreadManager>();
     let sessions = app.state::<Sessions>();
     let workspace = resolve_workspace(workspace)?;
-    let config = cli_config::load()?;
-    let setup = cli_config::model_setup(&config)?;
-    let model = setup.reference.clone();
-    let context_window = setup.context_window;
-    let limits = config.limits.clone();
-    let guardrails = config.guardrails.clone();
-    let skill_dirs = cli_config::user_skill_dirs(&config);
-    let subagents = cli_config::subagents(&config);
-    let agent_workspace = workspace.clone();
-    let (memory, memory_note) = match sessions.memory() {
+    let settings = app.state::<SettingsStore>().require()?;
+    let plan = agent_factory::thread_plan(&settings, workspace.clone(), &OsKeys)?;
+    let model = plan.model;
+    let context_window = plan.context_window;
+    let (memory, memory_note) = match sessions.memory(&settings.memory) {
         Ok(opened) => (Some(opened.memory), opened.note),
         Err(_) if session_id.is_some() => {
             return Err(
@@ -161,28 +281,10 @@ fn open_thread_blocking(
         Err(problem) => (None, Some(format!("This thread is not saved: {problem}"))),
     };
     let resume = session_id.clone();
+    let mut builder = plan.builder;
 
     let opened = threads.open(
         Box::new(move || {
-            let mut builder = Agent::builder()
-                .provider(setup.provider)
-                .workspace(agent_workspace)
-                .builtins(Builtins::All)
-                // Side-effecting calls go to the user; the thread actor installs the approver.
-                .approval(ApprovalMode::Ask)
-                .guardrails(guardrails)
-                .context_window(setup.context_window)
-                .max_output_tokens(setup.max_output_tokens)
-                .max_steps(limits.max_steps)
-                .max_cost_usd(limits.max_cost_usd)
-                .max_wall_clock_s(limits.max_wall_clock_s)
-                .tool_timeout(Duration::from_secs(limits.tool_timeout_s));
-            for dir in skill_dirs {
-                builder = builder.skills_dir(dir);
-            }
-            if let Some(subagents) = subagents {
-                builder = builder.subagents(subagents);
-            }
             if let Some(memory) = memory {
                 builder = builder.memory(memory);
                 if let Some(id) = resume {
@@ -196,7 +298,7 @@ fn open_thread_blocking(
             let _ = on_event.send(event);
         }),
         workspace.clone(),
-        config.tools.mention_max_bytes,
+        settings.tools.mention_max_bytes,
         session_id.as_deref(),
     )?;
     sessions.record_workspace(&opened.session_id, &workspace);
@@ -219,9 +321,13 @@ pub async fn list_sessions(
     limit: Option<usize>,
 ) -> Result<SessionList, String> {
     let limit = limit.unwrap_or(100).min(500);
-    tauri::async_runtime::spawn_blocking(move || app.state::<Sessions>().list(limit))
-        .await
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = app.state::<SettingsStore>().get().ok().flatten();
+        app.state::<Sessions>()
+            .list(settings.as_ref().map(|s| &s.memory), limit)
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 /// Give a saved session a title (as agent86's `/rename`). Returns the title kept.
@@ -232,7 +338,9 @@ pub async fn rename_session(
     title: String,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Sessions>().rename(&session_id, &title)
+        let settings = app.state::<SettingsStore>().require()?;
+        app.state::<Sessions>()
+            .rename(&settings.memory, &session_id, &title)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -323,6 +431,13 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         let pin = format!("agent86-core = \"={AGENT86_CORE_VERSION}\"");
         assert!(manifest.contains(&pin), "Cargo.toml should contain {pin}");
+    }
+
+    #[test]
+    fn before_setup_the_model_says_to_set_one_up() {
+        let info = describe_model(&SettingsStore::open(None));
+        assert_eq!(info.reference, "");
+        assert!(info.problem.unwrap().contains("Set up a model"));
     }
 
     #[test]

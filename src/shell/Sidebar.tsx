@@ -23,6 +23,8 @@ export function Sidebar({
   onNew,
   onOpen,
   onRefresh,
+  onSettings,
+  settingsOpen,
 }: {
   list: SessionList | null;
   /** Session ids open in tabs. */
@@ -32,6 +34,9 @@ export function Sidebar({
   onNew: () => void;
   onOpen: (session: SessionSummary) => void;
   onRefresh: () => void;
+  onSettings: () => void;
+  /** The settings view is showing. */
+  settingsOpen: boolean;
 }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
@@ -100,6 +105,18 @@ export function Sidebar({
           {list.note}
         </p>
       )}
+      <div className="border-t border-border p-2">
+        <button
+          type="button"
+          onClick={onSettings}
+          aria-pressed={settingsOpen}
+          className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-panel-2 ${
+            settingsOpen ? "bg-panel-2 text-text" : "text-muted"
+          }`}
+        >
+          ⚙ Settings
+        </button>
+      </div>
     </aside>
   );
 }

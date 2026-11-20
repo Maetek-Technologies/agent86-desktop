@@ -2,14 +2,14 @@
 
 export type ModelInfo = { 
 /**
- * `provider:model`.
+ * `provider:model`; empty before setup. Under triage, the frontier model.
  */
 reference: string, contextWindow: number, 
 /**
- * The config files the model came from.
+ * Turns are routed between a cheap and a frontier model.
  */
-source: string, 
+triage: boolean, 
 /**
- * Why a thread cannot start with this model (no key, unknown provider), if it cannot.
+ * Why a thread cannot start with these settings (not set up, no key), if it cannot.
  */
 problem: string | null, };

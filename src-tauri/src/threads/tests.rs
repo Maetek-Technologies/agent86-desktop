@@ -319,14 +319,19 @@ fn a_missing_workspace_fails_to_start() {
     assert!(start(vec![], &missing, Builtins::ReadOnly).is_err());
 }
 
-/// A real turn against the model in the agent86 CLI's config, through the same path the app
-/// uses. Needs that model to be reachable (and its key, if it has one), so it only runs when
-/// asked: `cargo test real_model -- --ignored --nocapture`.
+/// A real turn against the model in the agent86 CLI's config, imported as the first-run screen
+/// imports it and built as the app builds it (keys from the real keyring). Needs that model to be
+/// reachable, so it only runs when asked: `cargo test real_model -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn real_model_smoke() {
-    let config = crate::cli_config::load().expect("CLI config");
-    let setup = crate::cli_config::model_setup(&config).expect("model");
+    let path = crate::cli_import::cli_config_path().expect("a home folder");
+    let settings = crate::cli_import::preview(&path)
+        .expect("CLI config")
+        .settings;
+    let setup =
+        crate::agent_factory::model(&settings, &settings.model.default, &crate::keys::OsKeys)
+            .expect("model");
     eprintln!(
         "model: {} (window {})",
         setup.reference, setup.context_window
