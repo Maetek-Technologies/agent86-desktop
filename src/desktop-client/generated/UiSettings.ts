@@ -10,4 +10,8 @@ notifications: boolean,
 /**
  * Show a tray (menu bar) icon with the number of running turns.
  */
-tray: boolean, };
+tray: boolean, 
+/**
+ * Look for a newer version on GitHub Releases when the app starts.
+ */
+checkUpdates: boolean, };

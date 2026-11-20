@@ -1,0 +1,167 @@
+# Agent 86 user guide
+
+Agent 86 is a desktop app for the [agent86](https://github.com/Maetek-Technologies/agent86) coding
+agent. The agent runs inside the app: there is no separate `agent86` program, server, or browser to
+set up. It shares API keys, sessions, and memory with the agent86 CLI, so you can start work in one
+and carry on in the other.
+
+## Install
+
+Download the installer for your system from the
+[latest release](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest).
+
+| System                | File                                                                        |
+| --------------------- | --------------------------------------------------------------------------- |
+| Windows 10 and 11     | `Agent 86_<version>_x64-setup.exe` (installs for you only, no admin prompt); or the `.msi` for an install for all users |
+| macOS, Apple Silicon  | `Agent 86_<version>_aarch64.dmg`                                            |
+| macOS, Intel          | `Agent 86_<version>_x64.dmg`                                                |
+| Linux                 | `.AppImage` (any distribution; updates itself), or `.deb` / `.rpm`          |
+
+Windows needs WebView2, which Windows 11 already has (the installer fetches it on Windows 10 if
+needed). On Linux the `.deb` and `.rpm` pull in WebKitGTK; the AppImage carries what it needs.
+
+### The first time you open it
+
+Until the app is code-signed, your system may warn about it:
+
+- **Windows:** SmartScreen says "Windows protected your PC". Choose **More info**, then **Run
+  anyway**.
+- **macOS:** if macOS says the app "can't be opened" or "is damaged", open **System Settings,
+  Privacy & Security** and choose **Open Anyway**, or run
+  `xattr -dr com.apple.quarantine "/Applications/Agent 86.app"` once.
+- **Linux (AppImage):** make it executable (`chmod +x Agent*.AppImage`) and run it.
+
+## Set up a model
+
+The first start offers two ways in:
+
+- **Use your agent86 CLI settings.** If you use the CLI, the app finds `~/.agent86/config.toml` and
+  shows what it would bring over: providers, models, triage, limits, guardrails, MCP servers, and
+  prices. It is a one-time copy; later changes on either side stay on that side.
+- **Set up a provider.** Pick one (OpenRouter, Anthropic, OpenAI, Google, Ollama, vLLM, and other
+  OpenAI-compatible servers), give the model name and, if it needs one, an API key. **Test** sends
+  a one-line request to check the address, the key, and the model.
+
+API keys go to your system's keyring (Windows Credential Manager, macOS Keychain, or the Secret
+Service on Linux) under the same entries `agent86 keys set <provider>` uses, so a key stored by
+either works in both. A provider's key variable (such as `OPENROUTER_API_KEY`), when set, wins.
+Keys are never written to the settings file, and the app never shows them again.
+
+Everything else is under **Settings** (Ctrl+, or ⌘,): models and triage, providers and keys,
+limits, guardrails and approvals, MCP servers, sub-agents and skills, memory, trusted projects,
+appearance, and updates. Threads opened after a change use it; an open thread picks it up with
+**Reload** in its header.
+
+## Threads
+
+**New thread** (Ctrl+T or ⌘T) asks for a workspace folder. The agent works only inside it: files
+outside are out of reach, and commands run in agent86's sandbox. Each thread is a tab; threads run
+in parallel (up to eight open at once), and a tab that needs you shows **waiting for you**.
+
+In the prompt:
+
+- **Enter** sends, **Shift+Enter** starts a new line, **↑** and **↓** go through what you sent before.
+- **`/`** lists commands: `/skills`, `/agents`, `/tools`, `/memory`, `/secrets`, a skill by name
+  (`/code-reviewer check src/`), or a specialist (`/agent explorer find the parser`).
+- **`@`** mentions a file in the workspace; its contents go to the model with your message.
+- **Esc** stops a running turn (or closes a menu).
+
+The agent's answer streams in with its thinking (folded) and a card for each tool call. Cards for
+edits show the diff; reads show the file, highlighted; commands show their output. The header shows
+the model, how full its context is, and what the thread has spent.
+
+### Approvals
+
+Anything that changes your files or runs a command asks first, unless you chose otherwise in
+**Settings, Guardrails**. The approval shows exactly what would happen (the diff, the command) and
+offers **Allow once**, **Always allow** that tool in this thread, or **Reject**. If a turn reaches a
+limit (steps, output), you can raise it for this turn or stop. If the agent needs a secret (a token,
+a password), it asks for it by name: the value goes to the tools that need it as an environment
+variable and the model only ever sees `${secret:NAME}`.
+
+### Sessions
+
+Every thread is saved as it goes, in the same database the CLI uses (`~/.agent86/memory.db`). The
+sidebar lists recent sessions, from the app and the CLI; click one to reopen it. Double-click a
+tab's title to rename it. A session the app has not seen before asks which folder it belongs to.
+
+### Sub-agents and worktrees
+
+The agent can hand work to sub-agents (`delegate`) and to specialists you define. Their own tool
+calls show inside the card that started them. A specialist with `isolation: worktree` works in a
+separate git worktree: nothing it changes touches your workspace, and its card shows the branch, the
+files, and the diff so you can merge it yourself.
+
+### Files on tool cards
+
+A card's file has **open** (in its default app) and **reveal** (in Explorer, Finder, or your file
+manager). Only files inside the thread's workspace, or a worktree its sub-agents kept, can be
+opened. Programs and scripts are only revealed, never opened, so a file the agent wrote cannot run
+by a click.
+
+## Memory, secrets, and projects
+
+- **Memory** (sidebar, or `/memory`) lists the facts and episodes the agent remembers, shared with
+  the CLI. Pin what should stay; forget what should not.
+- **Secrets** (thread header, or `/secrets`) lists the secrets a thread holds, by name only. Add one,
+  or keep one for the project in the keyring so threads opened there later (in the app or the CLI)
+  have it.
+- **Project trust.** A workspace can bring its own skills (`.agent86/skills`, `.claude/skills`),
+  specialists (`.agent86/agents`), and MCP servers (`.agent86/config.toml`). They load only after
+  you review and trust them, and again after any change to them. **Settings, Projects** lists the
+  projects you trust.
+
+## Appearance, notifications, and shortcuts
+
+**Settings, Appearance** sets the theme (as the system, light, or dark), notifications, and a tray
+(menu bar) icon that shows how many turns are running. Notifications tell you when a thread in the
+background needs an approval, a limit raise, or a secret, and when a turn of 30 seconds or more
+ends; clicking one shows that thread. The window remembers its size and place. Opening the app
+again while it runs brings the open window forward.
+
+| Keys (⌘ on macOS)                         | Does                          |
+| ----------------------------------------- | ----------------------------- |
+| Ctrl+T                                    | New thread                    |
+| Ctrl+W                                    | Close tab                     |
+| Ctrl+Tab, Ctrl+Shift+Tab                  | Next, previous tab            |
+| Ctrl+PageDown, Ctrl+PageUp (⌘⇧], ⌘⇧[)     | Next, previous tab            |
+| Ctrl+1 … Ctrl+8, Ctrl+9                   | Tab 1 to 8, the last tab      |
+| Ctrl+L                                    | Focus the prompt              |
+| Ctrl+.                                    | Stop the running turn         |
+| Ctrl+,                                    | Settings                      |
+
+## Updates
+
+The app checks GitHub Releases for a newer version when it starts (turn this off in **Settings,
+About**). When there is one, the sidebar says so; **Settings, About** shows the release notes and
+**Download and install**. Every update is verified against the app's update key before it is
+installed. On Windows the installer closes the app to update it; on macOS and with the Linux
+AppImage, **Restart now** finishes. A `.deb` or `.rpm` install is updated with your package manager
+(download the new package from the release).
+
+## Where things are kept
+
+| What                         | Where                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| Settings, window state, trusted projects, session folders | `%APPDATA%\com.maetek.agent86.desktop` (Windows), `~/Library/Application Support/com.maetek.agent86.desktop` (macOS), `~/.config/com.maetek.agent86.desktop` (Linux) |
+| Sessions and memory          | `~/.agent86/memory.db`, shared with the CLI                                               |
+| API keys and kept secrets    | The system keyring, service `agent86`                                                      |
+
+To start over, quit the app and delete the settings folder; your sessions, memory, and keys stay.
+To uninstall, use **Apps** (Windows), drag the app to the Trash (macOS), or remove the package or
+AppImage (Linux); the folders above are left for you to delete.
+
+## Troubleshooting
+
+- **"Set up a model first"** or a key problem on the start screen: open **Settings, Providers** and
+  use **Test** on the model.
+- **A thread will not open:** eight threads are the most at once; close one. A session already open
+  in a tab opens that tab instead.
+- **A project's skills or MCP servers are missing:** the project is not trusted yet, or changed since;
+  look for the trust banner in its thread.
+- **A note says memory fell back to another embedder:** the CLI's embedding model
+  (`all-MiniLM-L6-v2`) could not be loaded, for example because it is not downloaded yet and
+  **Settings, Memory** keeps the app offline. The thread still runs and is saved, but what it
+  remembers is not found by the CLI, and the other way round, until the model loads.
+- **Report a problem:** [open an issue](https://github.com/Maetek-Technologies/agent86-desktop/issues)
+  with the version from **Settings, About**.

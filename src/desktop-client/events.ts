@@ -54,4 +54,6 @@ export type { TrustedProject } from "./generated/TrustedProject";
 export type { TurnInfo } from "./generated/TurnInfo";
 export type { TurnRequest } from "./generated/TurnRequest";
 export type { UiSettings } from "./generated/UiSettings";
+export type { UpdateInfo } from "./generated/UpdateInfo";
+export type { UpdateProgress } from "./generated/UpdateProgress";
 export type { UsageInfo } from "./generated/UsageInfo";

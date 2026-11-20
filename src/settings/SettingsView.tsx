@@ -14,6 +14,7 @@ import type {
   SettingsState,
   Theme,
   TrustedProject,
+  UpdateInfo,
 } from "../desktop-client/events.ts";
 import { isMac, shortcutList } from "../shell/shortcuts.ts";
 import {
@@ -29,6 +30,7 @@ import {
   Toggle,
 } from "./fields.tsx";
 import { ProvidersSection } from "./Providers.tsx";
+import { AboutSection } from "./Updates.tsx";
 import {
   formatPairs,
   parseAmount,
@@ -48,8 +50,9 @@ const SECTIONS = [
   "Memory",
   "Projects",
   "Appearance",
+  "About",
 ] as const;
-type SectionName = (typeof SECTIONS)[number];
+export type SectionName = (typeof SECTIONS)[number];
 
 /**
  * The app's settings, edited as a draft and kept with Save. Threads already open keep the
@@ -59,13 +62,18 @@ export function SettingsView({
   state,
   onSaved,
   onClose,
+  initialSection = "Model",
+  update = null,
 }: {
   state: SettingsState & { settings: Settings };
   onSaved: (settings: Settings) => void;
   onClose: () => void;
+  initialSection?: SectionName;
+  /** An update the startup check found, for the About section. */
+  update?: UpdateInfo | null;
 }) {
   const [draft, setDraft] = useState<Settings>(state.settings);
-  const [section, setSection] = useState<SectionName>("Model");
+  const [section, setSection] = useState<SectionName>(initialSection);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -155,6 +163,15 @@ export function SettingsView({
             )}
             {section === "Projects" && <ProjectsSection />}
             {section === "Appearance" && <AppearanceSection draft={draft} onChange={change} />}
+            {section === "About" && (
+              <AboutSection
+                found={update}
+                checkOnStart={draft.ui.checkUpdates}
+                onCheckOnStart={(checkUpdates) =>
+                  change({ ...draft, ui: { ...draft.ui, checkUpdates } })
+                }
+              />
+            )}
           </div>
         </main>
       </div>

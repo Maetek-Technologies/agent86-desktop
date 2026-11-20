@@ -1,6 +1,6 @@
 [package]
 name = "agent86-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "A desktop app for agent86"
 license = "MIT"
 edition = "2021"
@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
+# Updates from GitHub Releases, verified with the updater key (src/updates.rs).
+tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 # Pinned exactly: a few things the app must do as the CLI does sit outside the crate's semver
 # promise (the keyring layout, the embedder, the context-window and price tables, `Memory::store()`;

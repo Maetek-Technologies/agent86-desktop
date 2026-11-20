@@ -15,6 +15,7 @@ use crate::threads::manager::TurnRequest;
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
 use crate::trust::{self, ProjectStatus, TrustState, TrustStore};
+use crate::updates::{self, UpdateInfo, UpdateProgress};
 use agent86_core::sdk::Memory;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -552,6 +553,28 @@ pub async fn open_path(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Look for a newer version on GitHub Releases. `None` when this one is the latest.
+#[tauri::command]
+pub async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    updates::check(&app).await
+}
+
+/// Download and install the update the last check found; `on_progress` hears how it goes. On
+/// Windows the installer then closes the app; elsewhere call `restart_app`.
+#[tauri::command]
+pub async fn install_update(
+    app: tauri::AppHandle,
+    on_progress: Channel<UpdateProgress>,
+) -> Result<(), String> {
+    updates::install(&app, on_progress).await
+}
+
+/// Restart the app (after an update is installed). Running turns stop.
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    app.restart()
 }
 
 /// An existing directory, made absolute with symlinks followed, as agent86-core's jail sees it.

@@ -3,6 +3,7 @@ import {
   answer,
   appInfo,
   cancelTurn,
+  checkUpdate,
   closeThread,
   findFiles,
   getSettings,
@@ -22,7 +23,7 @@ import {
   type SettingsState,
 } from "./desktop-client/backend.ts";
 import { listItems, parseCommand } from "./desktop-client/commands.ts";
-import type { Answer, DesktopEvent, SessionSummary } from "./desktop-client/events.ts";
+import type { Answer, DesktopEvent, SessionSummary, UpdateInfo } from "./desktop-client/events.ts";
 import type { LocalAction } from "./desktop-client/session-state.ts";
 import { notificationFor } from "./shell/notify.ts";
 import { isMac, shortcutFor, tabTarget } from "./shell/shortcuts.ts";
@@ -32,7 +33,7 @@ import { applyTheme } from "./shell/theme.ts";
 import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./shell/tabs.ts";
 import { MemoryPanel } from "./memory/MemoryPanel.tsx";
 import { FirstRun } from "./settings/FirstRun.tsx";
-import { SettingsView } from "./settings/SettingsView.tsx";
+import { SettingsView, type SectionName } from "./settings/SettingsView.tsx";
 import { ThreadView } from "./thread/ThreadView.tsx";
 
 let nextKey = 0;
@@ -48,6 +49,8 @@ export function App() {
   const [sessions, setSessions] = useState<SessionList | null>(null);
   const [settingsState, setSettingsState] = useState<SettingsState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SectionName>("Model");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [showMemory, setShowMemory] = useState(false);
   const [opening, setOpening] = useState(false);
   const [state, dispatchTabs] = useReducer(tabsReduce, NO_TABS);
@@ -86,6 +89,19 @@ export function App() {
     refreshSessions();
   }, [refreshModel, refreshSessions]);
 
+  // Once per start, if allowed: is there a newer version? Failures (offline, no release yet) are
+  // silent here; Settings, About shows them when the user checks.
+  const checkOnStart = settingsState?.settings?.ui.checkUpdates ?? false;
+  const checkedForUpdate = useRef(false);
+  useEffect(() => {
+    if (!checkOnStart || checkedForUpdate.current) return;
+    checkedForUpdate.current = true;
+    const timer = setTimeout(() => {
+      checkUpdate().then(setUpdate, () => {});
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [checkOnStart]);
+
   const theme = settingsState?.settings?.ui.theme;
   useEffect(() => {
     if (theme) applyTheme(theme);
@@ -115,11 +131,12 @@ export function App() {
     [refreshModel, refreshSessions],
   );
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((section: SectionName = "Model") => {
     // Fresh: whether the memory database is open, and whether a CLI config appeared.
     getSettings().then(
       (state) => {
         setSettingsState(state);
+        setSettingsSection(section);
         setShowSettings(true);
       },
       (e: unknown) => setError(String(e)),
@@ -227,7 +244,7 @@ export function App() {
   );
 
   const toggleSettings = useCallback(
-    () => (showSettings ? setShowSettings(false) : openSettings()),
+    () => (showSettings ? setShowSettings(false) : openSettings("Model")),
     [showSettings, openSettings],
   );
 
@@ -321,6 +338,8 @@ export function App() {
         settingsOpen={showSettings}
         onMemory={() => setShowMemory((open) => !open)}
         memoryOpen={showMemory}
+        update={update}
+        onUpdate={() => openSettings("About")}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {state.tabs.length > 0 && (
@@ -367,7 +386,7 @@ export function App() {
               model={model}
               opening={opening}
               onNew={() => void newThread()}
-              onSettings={openSettings}
+              onSettings={() => openSettings("Model")}
             />
           )}
           {showMemory && (
@@ -378,9 +397,12 @@ export function App() {
           {showSettings && ready && (
             <div className="absolute inset-0 z-10">
               <SettingsView
+                key={settingsSection}
                 state={ready}
                 onSaved={settingsSaved}
                 onClose={() => setShowSettings(false)}
+                initialSection={settingsSection}
+                update={update}
               />
             </div>
           )}

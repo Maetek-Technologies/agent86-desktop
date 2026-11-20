@@ -12,6 +12,7 @@ mod settings;
 mod threads;
 mod trust;
 mod unstable;
+mod updates;
 mod workspace_files;
 
 use tauri::Manager;
@@ -42,8 +43,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(threads::ThreadManager::default())
         .manage(desktop::Desktop::default())
+        .manage(updates::Updates::default())
         .setup(move |app| {
             // Without a config folder (an unusual profile) the app still runs; it just does not
             // remember its settings or which folder each session ran in.
@@ -81,6 +84,9 @@ pub fn run() {
             commands::reload_thread,
             commands::notify,
             commands::open_path,
+            commands::check_update,
+            commands::install_update,
+            commands::restart_app,
             panel_commands::list_memory,
             panel_commands::pin_memory,
             panel_commands::forget_memory,

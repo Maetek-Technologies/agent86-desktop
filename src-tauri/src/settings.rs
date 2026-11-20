@@ -558,6 +558,8 @@ pub struct UiSettings {
     pub notifications: bool,
     /// Show a tray (menu bar) icon with the number of running turns.
     pub tray: bool,
+    /// Look for a newer version on GitHub Releases when the app starts.
+    pub check_updates: bool,
 }
 
 impl Default for UiSettings {
@@ -566,6 +568,7 @@ impl Default for UiSettings {
             theme: Theme::System,
             notifications: true,
             tray: false,
+            check_updates: true,
         }
     }
 }

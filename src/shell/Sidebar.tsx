@@ -1,4 +1,4 @@
-import type { SessionList, SessionSummary } from "../desktop-client/events.ts";
+import type { SessionList, SessionSummary, UpdateInfo } from "../desktop-client/events.ts";
 import { modLabel } from "./shortcuts.ts";
 import { folderName } from "./tabs.ts";
 
@@ -28,6 +28,8 @@ export function Sidebar({
   settingsOpen,
   onMemory,
   memoryOpen,
+  update = null,
+  onUpdate,
 }: {
   list: SessionList | null;
   /** Session ids open in tabs. */
@@ -42,6 +44,9 @@ export function Sidebar({
   settingsOpen: boolean;
   onMemory: () => void;
   memoryOpen: boolean;
+  /** A newer version the startup check found. */
+  update?: UpdateInfo | null;
+  onUpdate?: () => void;
 }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel text-sm">
@@ -112,6 +117,15 @@ export function Sidebar({
         </p>
       )}
       <div className="space-y-0.5 border-t border-border p-2">
+        {update && (
+          <button
+            type="button"
+            onClick={onUpdate}
+            className="w-full rounded border border-accent px-2 py-1 text-left text-xs text-accent hover:bg-panel-2"
+          >
+            Version {update.version} is available…
+          </button>
+        )}
         <button
           type="button"
           onClick={onMemory}

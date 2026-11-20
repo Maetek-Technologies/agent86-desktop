@@ -102,7 +102,7 @@ function defaults(): Settings {
       retentionMaxAgeDays: 0,
     },
     tools: { mentionMaxBytes: 200000 },
-    ui: { theme: "system", notifications: true, tray: false },
+    ui: { theme: "system", notifications: true, tray: false, checkUpdates: false },
     pricing: {},
     importedFrom: null,
   };
@@ -420,6 +420,47 @@ test("settings: edits a limit and saves; stores a key at once", async () => {
   await waitFor(() =>
     expect(calls.filter((c) => c.cmd === "key_statuses").length).toBeGreaterThan(1),
   );
+});
+
+test("about: checks for an update, installs it with progress, and offers a restart", async () => {
+  const update = {
+    version: "1.0.1",
+    currentVersion: "1.0.0",
+    notes: "Fixes the parser.",
+    date: "2026-12-01",
+  };
+  const calls = backend((cmd, args) => {
+    if (cmd === "check_update") return update;
+    if (cmd === "install_update") {
+      const channel = args.onProgress as { onmessage: (p: unknown) => void };
+      channel.onmessage({ type: "downloading", downloaded: 1_048_576, total: 2_097_152 });
+      channel.onmessage({ type: "installing" });
+      return null;
+    }
+    if (cmd === "restart_app") return null;
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Settings/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "About" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+  expect(await screen.findByText("Fixes the parser.")).toBeTruthy();
+  expect(screen.getByText("1.0.1")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Download and install" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+  await waitFor(() => expect(calls.map((c) => c.cmd)).toContain("restart_app"));
+});
+
+test("about: a failed check says why", async () => {
+  backend((cmd) => {
+    if (cmd === "check_update") throw new Error("No release has been published yet.");
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Settings/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "About" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/No release has been published/);
 });
 
 test("settings: a save the core refuses shows its problems and keeps the draft", async () => {

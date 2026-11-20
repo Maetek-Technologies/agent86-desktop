@@ -23,6 +23,8 @@ import type {
   Settings,
   SettingsState,
   TurnRequest,
+  UpdateInfo,
+  UpdateProgress,
 } from "./events.ts";
 
 export type {
@@ -158,6 +160,26 @@ export function onActivateTab(handler: (tab: string) => void): Promise<() => voi
  */
 export function openPath(threadId: string, path: string, reveal: boolean): Promise<void> {
   return invoke("open_path", { threadId, path, reveal });
+}
+
+/** Ask GitHub Releases for a newer version; `null` when this is the latest. */
+export function checkUpdate(): Promise<UpdateInfo | null> {
+  return invoke<UpdateInfo | null>("check_update");
+}
+
+/**
+ * Download, verify, and install the update the last check found. On Windows the installer then
+ * closes the app; elsewhere call `restartApp`.
+ */
+export function installUpdate(onProgress: (progress: UpdateProgress) => void): Promise<void> {
+  const channel = new Channel<UpdateProgress>();
+  channel.onmessage = onProgress;
+  return invoke("install_update", { onProgress: channel });
+}
+
+/** Restart the app; running turns stop. */
+export function restartApp(): Promise<void> {
+  return invoke("restart_app");
 }
 
 /** Rebuild a thread with the current settings and project trust, keeping its conversation. */

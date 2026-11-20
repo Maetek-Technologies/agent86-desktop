@@ -5,7 +5,7 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M7.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
+> **Status: 1.0.0.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
 > with diffs, approvals, limit raises, secret prompts, `/` commands, `@` file mentions, and a
 > context meter. Sessions are saved to the memory database the agent86 CLI uses
 > (`~/.agent86/memory.db`), listed in the sidebar, and can be reopened and renamed. The app has
@@ -16,8 +16,16 @@ Rust back end that embeds the agent in-process through
 > (including isolated runs in git worktrees) shows on their delegation's card. It notifies you
 > when a background thread needs you or a long turn ends, remembers its window, runs as a single
 > instance, can show a tray icon with the running turns, opens or reveals the files tool cards
-> show, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance). The
-> plan and milestones are in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+> show, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
+> updates itself from GitHub Releases. The plan and milestones are in
+> [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+
+## Install
+
+Download the installer for Windows, macOS (Apple Silicon or Intel), or Linux from the
+[latest release](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest). The
+[user guide](docs/USER_GUIDE.md) covers which file to pick, the first launch, setup, and everything
+the app does.
 
 ## Settings and keys
 
@@ -65,7 +73,7 @@ takes several minutes. Later builds are incremental.
 ```sh
 pnpm install
 pnpm app:dev        # Vite on :1420 plus the Tauri window, with hot reload
-pnpm app:build      # release build and installers for this platform
+pnpm app:build      # installers for this platform (needs the updater key: docs/RELEASING.md)
 
 pnpm test           # front-end tests (Vitest)
 cd src-tauri && cargo test real_model -- --ignored --nocapture   # one real turn with your CLI config's model
@@ -81,7 +89,7 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/`       | The React app; `desktop-client/` is the only code that calls into Rust; `desktop-client/generated/` holds the IPC types `cargo test` writes from Rust (ts-rs); `settings/` is the settings view and first-run screen |
 | `src-tauri/` | The Tauri app: commands, settings, keys, the CLI config import, and the thread actors around agent86-core; `src/unstable.rs` is the only code that uses agent86-core outside its semver-covered `sdk` module         |
-| `docs/`      | The project plan                                                                                                                                                                                                     |
+| `docs/`      | The project plan, the user guide, and how to release                                                                                                                                                                 |
 
 ## License
 

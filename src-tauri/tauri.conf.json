@@ -56,6 +56,31 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Maetek Technologies",
+    "copyright": "Copyright (c) 2026 Maetek Technologies. MIT License.",
+    "license": "MIT",
+    "homepage": "https://github.com/Maetek-Technologies/agent86-desktop",
+    "longDescription": "Agent 86 is a desktop app for the agent86 coding agent: threads in tabs, tool cards with diffs, approvals, sessions shared with the agent86 CLI, memory, secrets, skills, and specialists.",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg3N0RBNEIwODlCQkY4MjMKUldRaitMdUpzS1I5aDBPTWdxb0tTQzFXUXkzalB0c1FWVkYyeFVERU0vanl4OU1HZ2FWcUIrUk4K",
+      "endpoints": [
+        "https://github.com/Maetek-Technologies/agent86-desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
