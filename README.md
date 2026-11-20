@@ -5,8 +5,11 @@ React front end derived from [agent86-web](https://github.com/Maetek-Technologie
 Rust back end that embeds the agent in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core).
 
-> **Status: M0 (scaffold).** The window opens and talks to agent86-core. The plan and milestones
-> are in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+> **Status: M1.** One thread runs real turns: streamed answers, thinking, tool cards, and
+> cancel. The model and its key come from your agent86 CLI config (`~/.agent86/config.toml` and
+> the OS keyring) until the app has settings of its own (M5). Writes and commands are declined
+> until approvals arrive (M2). The plan and milestones are in
+> [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
 ## Prerequisites
 
@@ -28,6 +31,7 @@ pnpm app:dev        # Vite on :1420 plus the Tauri window, with hot reload
 pnpm app:build      # release build and installers for this platform
 
 pnpm test           # front-end tests (Vitest)
+cd src-tauri && cargo test real_model -- --ignored --nocapture   # one real turn with your CLI model
 pnpm lint && pnpm format:check && pnpm typecheck
 cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```

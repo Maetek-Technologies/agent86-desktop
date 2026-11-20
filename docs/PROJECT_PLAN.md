@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.1.0).
 
-Status: M0 (scaffold) built and verified on Windows (2026-11-19); M1 next.
+Status: M1 (one turn end to end) done 2026-11-19: verified against a real model on Windows; CI green on Windows, macOS, and Linux for M0. M2 (approvals) next.
 
 ---
 
@@ -223,7 +223,7 @@ agent86-desktop/
 | #      | Milestone          | Done when                                                                                       |
 | ------ | ------------------ | ----------------------------------------------------------------------------------------------- |
 | **M0** | Scaffold           | `pnpm tauri dev` opens a window; Tauri 2, React 19, Vite, Tailwind; `agent86-core` compiles on Windows (MSRV 1.94); CI builds on all three OSes |
-| **M1** | One turn end to end | Hard-coded provider and key from the keyring; one thread; prompt → streamed text, thoughts, tool cards; cancel works |
+| **M1** | One turn end to end | Hard-coded provider and key from the keyring; one thread; prompt → streamed text, thoughts, tool cards; cancel works. *As built:* the model comes from the CLI's `~/.agent86/config.toml` through agent86-core's loader and provider factory (`src-tauri/src/cli_config.rs`), a stopgap until M5; no approver yet, so side-effecting tools are declined |
 | **M2** | Approvals and questions | PermissionPanel and DiffView driven by the approver; allow-always set; limit raise dialog; SecretPrompt; cancel unblocks pending questions |
 | **M3** | UI port            | Transcript, tool cards, Markdown, highlighting, Spend, PromptInput, slash commands (`/skills`, `/agents`, `/tools`, `Turn::skill`, `Turn::specialist`), `@` file mentions via a Rust file walker |
 | **M4** | Threads and sessions | Multiple tabs with parallel turns; session list from `Memory::sessions`; resume with `.session(id)`; transcript rebuilt from `Conversation::messages`; rename; concurrency cap |
