@@ -11,6 +11,8 @@ function opened(threadId: string, history: OpenedThread["history"] = []): Opened
     contextWindow: 1000,
     capabilities: { skills: [], specialists: [], tools: [] },
     ownModel: false,
+    approval: "ask" as const,
+    ownApproval: false,
     sessionId: `s-${threadId}`,
     history,
     memoryNote: null,

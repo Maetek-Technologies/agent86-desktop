@@ -8,10 +8,10 @@ use crate::desktop;
 use crate::file_actions;
 use crate::keys::{self, KeyStatus, OsKeys};
 use crate::sessions::{SessionList, Sessions};
-use crate::settings::{self, ProviderPreset, ProviderSettings, Settings, SettingsStore};
+use crate::settings::{self, Approval, ProviderPreset, ProviderSettings, Settings, SettingsStore};
 use crate::threads::actor::{Capabilities, ThreadOptions};
 use crate::threads::history::HistoryItem;
-use crate::threads::manager::TurnRequest;
+use crate::threads::manager::{ThreadOverrides, TurnRequest};
 use crate::threads::questions::Answer;
 use crate::threads::{DesktopEvent, ThreadManager};
 use crate::trust::{self, ProjectStatus, TrustState, TrustStore};
@@ -240,6 +240,10 @@ pub struct OpenedThread {
     /// The thread runs on a model chosen in its header rather than the settings' (always false
     /// for a thread just opened).
     pub own_model: bool,
+    /// What happens to side-effecting tool calls in this thread.
+    pub approval: Approval,
+    /// `approval` was chosen in the thread's header rather than taken from the settings.
+    pub own_approval: bool,
     /// The agent86 session this thread saves to (new, or the one reopened).
     pub session_id: String,
     /// A reopened session's conversation; empty for a new one.
@@ -339,6 +343,8 @@ fn open_thread_blocking(
         context_window: setup.plan.context_window,
         capabilities: opened.capabilities,
         own_model: false,
+        approval: settings.guardrails.approval,
+        own_approval: false,
         session_id: opened.session_id,
         history: opened.history,
         memory_note,
@@ -383,6 +389,8 @@ pub struct ReloadedThread {
     pub model: String,
     /// The thread runs on a model chosen in its header rather than the settings'.
     pub own_model: bool,
+    pub approval: Approval,
+    pub own_approval: bool,
     #[ts(type = "number")]
     pub context_window: u64,
     pub capabilities: Capabilities,
@@ -398,9 +406,8 @@ pub async fn reload_thread(
     thread_id: String,
 ) -> Result<ReloadedThread, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let threads = app.state::<ThreadManager>();
-        let chosen = threads.model(&thread_id)?;
-        rebuild(&app, &thread_id, chosen.as_deref())
+        let overrides = app.state::<ThreadManager>().overrides(&thread_id)?;
+        rebuild(&app, &thread_id, &overrides)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -416,39 +423,66 @@ pub async fn set_thread_model(
     model: String,
 ) -> Result<ReloadedThread, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let model = Some(model.trim().to_owned()).filter(|model| !model.is_empty());
-        let reloaded = rebuild(&app, &thread_id, model.as_deref())?;
-        app.state::<ThreadManager>().set_model(&thread_id, model)?;
+        let threads = app.state::<ThreadManager>();
+        let overrides = ThreadOverrides {
+            model: Some(model.trim().to_owned()).filter(|model| !model.is_empty()),
+            ..threads.overrides(&thread_id)?
+        };
+        let reloaded = rebuild(&app, &thread_id, &overrides)?;
+        threads.set_overrides(&thread_id, overrides)?;
         Ok(reloaded)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// The settings a thread runs with: the app's, or with `model` alone (no triage) when the thread
-/// has a model of its own.
-fn settings_for(settings: Settings, model: Option<&str>) -> Settings {
-    match model {
-        Some(model) => {
-            let mut settings = settings;
-            settings.model.default = model.to_owned();
-            settings.model.triage = None;
-            settings
-        }
-        None => settings,
-    }
+/// Set what happens to side-effecting tool calls in thread `thread_id` from now on (ask, run
+/// without asking, refuse), keeping its conversation and its "always allow" choices: the
+/// permission menu in its header. `None` goes back to the settings' mode. Only between turns.
+#[tauri::command]
+pub async fn set_thread_approval(
+    app: tauri::AppHandle,
+    thread_id: String,
+    approval: Option<Approval>,
+) -> Result<ReloadedThread, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let threads = app.state::<ThreadManager>();
+        let overrides = ThreadOverrides {
+            approval,
+            ..threads.overrides(&thread_id)?
+        };
+        let reloaded = rebuild(&app, &thread_id, &overrides)?;
+        threads.set_overrides(&thread_id, overrides)?;
+        Ok(reloaded)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
-/// Rebuild thread `thread_id` from the current settings and project trust, on `model` if given.
+/// The settings a thread runs with: the app's, with what its header chose laid over them (a model
+/// runs alone, without triage).
+fn settings_for(settings: Settings, overrides: &ThreadOverrides) -> Settings {
+    let mut settings = settings;
+    if let Some(model) = &overrides.model {
+        settings.model.default = model.clone();
+        settings.model.triage = None;
+    }
+    if let Some(approval) = overrides.approval {
+        settings.guardrails.approval = approval;
+    }
+    settings
+}
+
+/// Rebuild thread `thread_id` from the current settings and project trust, with `overrides`.
 fn rebuild(
     app: &tauri::AppHandle,
     thread_id: &str,
-    model: Option<&str>,
+    overrides: &ThreadOverrides,
 ) -> Result<ReloadedThread, String> {
     let threads = app.state::<ThreadManager>();
     let workspace = threads.workspace(thread_id)?;
-    let settings = settings_for(app.state::<SettingsStore>().require()?, model);
-    if let Some(model) = model {
+    let settings = settings_for(app.state::<SettingsStore>().require()?, overrides);
+    if let Some(model) = &overrides.model {
         // Say plainly what is wrong (no such provider, no key) before touching the thread.
         agent_factory::model(&settings, model, &OsKeys)?;
     }
@@ -467,7 +501,9 @@ fn rebuild(
     )?;
     Ok(ReloadedThread {
         model: setup.plan.model,
-        own_model: model.is_some(),
+        own_model: overrides.model.is_some(),
+        approval: settings.guardrails.approval,
+        own_approval: overrides.approval.is_some(),
         context_window: setup.plan.context_window,
         capabilities,
         project: setup.project,
@@ -774,10 +810,31 @@ mod tests {
             cheap: "vllm:c".into(),
             frontier: "vllm:f".into(),
         });
-        let own = settings_for(settings.clone(), Some("openrouter:x"));
+        let model = ThreadOverrides {
+            model: Some("openrouter:x".into()),
+            approval: None,
+        };
+        let own = settings_for(settings.clone(), &model);
         assert_eq!(own.model.default, "openrouter:x");
         assert!(own.model.triage.is_none());
-        assert_eq!(settings_for(settings.clone(), None), settings);
+        assert_eq!(own.guardrails.approval, settings.guardrails.approval);
+        assert_eq!(
+            settings_for(settings.clone(), &ThreadOverrides::default()),
+            settings
+        );
+    }
+
+    #[test]
+    fn a_threads_own_approval_mode_replaces_the_settings() {
+        let settings = Settings::default();
+        assert_eq!(settings.guardrails.approval, Approval::Ask);
+        let auto = ThreadOverrides {
+            model: None,
+            approval: Some(Approval::Auto),
+        };
+        let own = settings_for(settings.clone(), &auto);
+        assert_eq!(own.guardrails.approval, Approval::Auto);
+        assert_eq!(own.model, settings.model);
     }
 
     #[test]

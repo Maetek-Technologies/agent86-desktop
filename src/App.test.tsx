@@ -51,6 +51,8 @@ function opened(threadId: string, workspace: string, sessionId: string, history:
     contextWindow: 32768,
     capabilities,
     ownModel: false,
+    approval: "ask" as const,
+    ownApproval: false,
     sessionId,
     history,
     memoryNote: null,
@@ -276,6 +278,8 @@ test("the header's model menu switches this thread's model", async () => {
       return {
         model: "vllm:small",
         ownModel: true,
+        approval: "ask",
+        ownApproval: false,
         contextWindow: 8192,
         capabilities,
         project: null,
@@ -292,6 +296,44 @@ test("the header's model menu switches this thread's model", async () => {
   expect(calls.find((c) => c.cmd === "set_thread_model")?.args).toEqual({
     threadId: "t1",
     model: "vllm:small",
+  });
+});
+
+test("the header's permission menu changes what this thread may do, and goes back", async () => {
+  let approval: string | null = null;
+  const calls = backend((cmd, args) => {
+    if (cmd === "set_thread_approval") {
+      approval = args.approval as string | null;
+      return {
+        model: "vllm:qwen",
+        ownModel: false,
+        approval: approval ?? "ask",
+        ownApproval: approval !== null,
+        contextWindow: 32768,
+        capabilities,
+        project: null,
+        notes: [],
+      };
+    }
+    return undefined;
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Choose a workspace/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Permissions: Ask/ }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /Auto/ }));
+  expect(await screen.findByRole("button", { name: /Permissions: Auto/ })).toBeTruthy();
+  expect(await screen.findByText(/\[permissions\] Auto from now on/)).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "set_thread_approval")?.args).toEqual({
+    threadId: "t1",
+    approval: "auto",
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /Permissions: Auto/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /settings' mode/ }));
+  expect(await screen.findByRole("button", { name: /Permissions: Ask/ })).toBeTruthy();
+  expect(calls.filter((c) => c.cmd === "set_thread_approval").at(-1)?.args).toEqual({
+    threadId: "t1",
+    approval: null,
   });
 });
 

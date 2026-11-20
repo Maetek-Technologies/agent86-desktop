@@ -83,6 +83,7 @@ pub fn run() {
             commands::close_thread,
             commands::reload_thread,
             commands::set_thread_model,
+            commands::set_thread_approval,
             commands::list_models,
             commands::notify,
             commands::open_path,

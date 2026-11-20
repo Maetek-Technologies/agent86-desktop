@@ -244,7 +244,9 @@ agent86-desktop/
 provider's live list (agent86-core's catalog, in `unstable.rs`, the CLI's `/model` source), filtered
 as you type, or any `provider:model`. `set_thread_model` rebuilds that thread on the model alone
 (no triage), keeping its conversation; the choice is kept across Reload, and an empty choice goes
-back to the settings' model.
+back to the settings' model. Beside it, a permission menu (`PermissionPicker`, `set_thread_approval`)
+sets the thread's approval mode (Ask, Auto, Read-only = agent86's `deny`) the same way; both
+choices are the thread's `ThreadOverrides`, laid over the settings on every rebuild.
 
 ## 8. Testing
 

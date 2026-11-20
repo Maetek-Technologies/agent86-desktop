@@ -5,6 +5,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   Answer,
+  Approval,
   AppInfo,
   DesktopEvent,
   ImportPreview,
@@ -194,6 +195,17 @@ export function listModels(): Promise<ModelMenu> {
  */
 export function setThreadModel(threadId: string, model: string): Promise<ReloadedThread> {
   return invoke<ReloadedThread>("set_thread_model", { threadId, model });
+}
+
+/**
+ * Set what happens to a thread's side-effecting tool calls from now on (ask, run without asking,
+ * refuse), keeping its conversation; `null` goes back to the settings' mode. Only between turns.
+ */
+export function setThreadApproval(
+  threadId: string,
+  approval: Approval | null,
+): Promise<ReloadedThread> {
+  return invoke<ReloadedThread>("set_thread_approval", { threadId, approval });
 }
 
 /** Rebuild a thread with the current settings and project trust, keeping its conversation. */

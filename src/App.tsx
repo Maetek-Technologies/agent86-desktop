@@ -16,6 +16,7 @@ import {
   prompt,
   reloadThread,
   renameSession,
+  setThreadApproval,
   setThreadModel,
   type AppInfo,
   type ModelInfo,
@@ -24,7 +25,13 @@ import {
   type SettingsState,
 } from "./desktop-client/backend.ts";
 import { listItems, parseCommand } from "./desktop-client/commands.ts";
-import type { Answer, DesktopEvent, SessionSummary, UpdateInfo } from "./desktop-client/events.ts";
+import type {
+  Answer,
+  Approval,
+  DesktopEvent,
+  SessionSummary,
+  UpdateInfo,
+} from "./desktop-client/events.ts";
 import type { LocalAction } from "./desktop-client/session-state.ts";
 import { notificationFor } from "./shell/notify.ts";
 import { isMac, shortcutFor, tabTarget } from "./shell/shortcuts.ts";
@@ -35,6 +42,7 @@ import { folderName, NO_TABS, tabsReduce, type Tab, type TabsAction } from "./sh
 import { MemoryPanel } from "./memory/MemoryPanel.tsx";
 import { FirstRun } from "./settings/FirstRun.tsx";
 import { SettingsView, type SectionName } from "./settings/SettingsView.tsx";
+import { MODES } from "./thread/PermissionPicker.tsx";
 import { ThreadView } from "./thread/ThreadView.tsx";
 
 let nextKey = 0;
@@ -503,6 +511,30 @@ function TabView({
     [opened, key, local, dispatchTab],
   );
 
+  const chooseApproval = useCallback(
+    (approval: Approval | null) => {
+      setReloading(true);
+      setThreadApproval(opened.threadId, approval).then(
+        (reloaded) => {
+          dispatchTab({ type: "reloaded", key, reloaded });
+          const mode = MODES[reloaded.approval];
+          local({
+            type: "local/notice",
+            text: approval
+              ? `[permissions] ${mode.label} from now on in this thread: ${mode.detail.toLowerCase()}.`
+              : `[permissions] back to the settings' mode, ${mode.label}.`,
+          });
+          setReloading(false);
+        },
+        (e: unknown) => {
+          local({ type: "local/warning", text: String(e) });
+          setReloading(false);
+        },
+      );
+    },
+    [opened, key, local, dispatchTab],
+  );
+
   const stop = useCallback(() => {
     local({ type: "local/cancelling" });
     cancelTurn(opened.threadId).catch((e: unknown) =>
@@ -534,6 +566,7 @@ function TabView({
       onReload={reload}
       reloading={reloading}
       onModel={chooseModel}
+      onApproval={chooseApproval}
     />
   );
 }

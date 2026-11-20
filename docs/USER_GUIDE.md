@@ -80,6 +80,13 @@ the model, how full its context is, and what the thread has spent.
 
 ### Approvals
 
+**Permissions per thread.** The 🛡 button in a thread's header sets what the agent may do there:
+**Ask** before each change and command, **Auto** (make changes and run commands without asking), or
+**Read-only** (every change and command is refused; reading still works). It applies to that thread
+only, between turns, and keeps the conversation and its "always allow" choices; **Use the settings'
+mode** goes back to the default from **Settings, Guardrails**. A dot beside it means the thread has
+a mode of its own.
+
 Anything that changes your files or runs a command asks first, unless you chose otherwise in
 **Settings, Guardrails**. The approval shows exactly what would happen (the diff, the command) and
 offers **Allow once**, **Always allow** that tool in this thread, or **Reject**. If a turn reaches a

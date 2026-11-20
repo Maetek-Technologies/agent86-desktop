@@ -61,9 +61,18 @@ struct Thread {
     /// The git worktrees isolated sub-agents of this thread left behind (agent86's `[worktree]`
     /// note), so their files can be opened as the workspace's can.
     worktrees: Arc<Mutex<Vec<PathBuf>>>,
-    /// The model chosen for this thread in its header (`provider:model`), instead of the
-    /// settings' default and triage. Kept across reloads.
-    model: Mutex<Option<String>>,
+    /// What this thread's header chose instead of the settings (model, approval mode). Kept
+    /// across reloads.
+    overrides: Mutex<ThreadOverrides>,
+}
+
+/// Choices made for one thread in its header, instead of the settings'.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThreadOverrides {
+    /// `provider:model`, run alone (no triage).
+    pub model: Option<String>,
+    /// Ask, run without asking, or refuse side-effecting tool calls.
+    pub approval: Option<crate::settings::Approval>,
 }
 
 #[derive(Default)]
@@ -112,7 +121,7 @@ impl ThreadManager {
                 workspace,
                 mention_max_bytes,
                 worktrees,
-                model: Mutex::new(None),
+                overrides: Mutex::new(ThreadOverrides::default()),
             },
         );
         Ok(Opened {
@@ -190,18 +199,22 @@ impl ThreadManager {
         })
     }
 
-    /// The model chosen for thread `id`, if one was.
-    pub fn model(&self, id: &str) -> Result<Option<String>, String> {
+    /// What thread `id`'s header chose instead of the settings.
+    pub fn overrides(&self, id: &str) -> Result<ThreadOverrides, String> {
         self.with(id, |thread| {
-            Ok(thread.model.lock().map(|m| m.clone()).unwrap_or_default())
+            Ok(thread
+                .overrides
+                .lock()
+                .map(|o| o.clone())
+                .unwrap_or_default())
         })
     }
 
-    /// Remember `model` as thread `id`'s choice (after its agent was rebuilt with it).
-    pub fn set_model(&self, id: &str, model: Option<String>) -> Result<(), String> {
+    /// Remember `overrides` for thread `id` (after its agent was rebuilt with them).
+    pub fn set_overrides(&self, id: &str, overrides: ThreadOverrides) -> Result<(), String> {
         self.with(id, |thread| {
-            if let Ok(mut chosen) = thread.model.lock() {
-                *chosen = model;
+            if let Ok(mut kept) = thread.overrides.lock() {
+                *kept = overrides;
             }
             Ok(())
         })

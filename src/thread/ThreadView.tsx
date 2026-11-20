@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { commandsFor } from "../desktop-client/commands.ts";
-import type { Answer, OpenedThread } from "../desktop-client/events.ts";
+import type { Answer, Approval, OpenedThread } from "../desktop-client/events.ts";
 import type { Entry, Question, SessionState } from "../desktop-client/session-state.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
@@ -11,6 +11,7 @@ import { LimitPanel } from "./LimitPanel.tsx";
 import { PromptInput } from "./PromptInput.tsx";
 import { ContextMeter, TurnSummaryLine } from "./Spend.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
+import { PermissionPicker } from "./PermissionPicker.tsx";
 import { ThreadContext } from "./ThreadContext.ts";
 import { ToolCard } from "./ToolCard.tsx";
 
@@ -30,6 +31,8 @@ interface Props {
   reloading: boolean;
   /** Switch this thread's model (`""`: back to the settings' model). */
   onModel: (reference: string) => void;
+  /** Switch this thread's approval mode (`null`: back to the settings' mode). */
+  onApproval: (approval: Approval | null) => void;
 }
 
 export function ThreadView({
@@ -44,6 +47,7 @@ export function ThreadView({
   onReload,
   reloading,
   onModel,
+  onApproval,
 }: Props) {
   const [reviewing, setReviewing] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
@@ -71,6 +75,13 @@ export function ThreadView({
             disabled={state.running}
             switching={reloading}
             onChoose={onModel}
+          />
+          <PermissionPicker
+            approval={thread.approval}
+            ownApproval={thread.ownApproval}
+            disabled={state.running}
+            switching={reloading}
+            onChoose={onApproval}
           />
           <ContextMeter
             lastStep={state.lastStep}
