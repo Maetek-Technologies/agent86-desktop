@@ -183,6 +183,9 @@ export interface SessionState {
   uiLog: UiMessage[];
   /** Surfaces with a pressed button held for the running turn to end (one per press). */
   uiHeld: string[];
+  /** Surfaces locked because the user sent from them, until the agent changes them or the user
+   * unlocks them to send again. */
+  uiSent: string[];
   nextId: number;
 }
 
@@ -197,6 +200,7 @@ export function initialState(): SessionState {
     questions: [],
     uiLog: [],
     uiHeld: [],
+    uiSent: [],
     nextId: 1,
   };
 }
@@ -219,6 +223,10 @@ export type LocalAction =
   | { type: "local/uiInput"; surfaceId: string; path: string; value: unknown }
   /** A button pressed on a surface is held until the running turn ends. */
   | { type: "local/uiHeld"; surfaceId: string }
+  /** The user sent an action from a surface: lock it. */
+  | { type: "local/uiSent"; surfaceId: string }
+  /** The user unlocked a surface to change it and send again. */
+  | { type: "local/uiUnlock"; surfaceId: string }
   /** A reopened session's surfaces, as agent86 rebuilt them (one `createSurface` each), placed
    * after the history's last `render_ui` call that drew each one. */
   | { type: "local/surfaces"; messages: UiMessage[] };
@@ -276,6 +284,12 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
     }
     case "local/surfaces":
       return action.messages.reduce(placeSurface, state);
+    case "local/uiSent":
+      return state.uiSent.includes(action.surfaceId)
+        ? state
+        : { ...state, uiSent: [...state.uiSent, action.surfaceId] };
+    case "local/uiUnlock":
+      return { ...state, uiSent: state.uiSent.filter((id) => id !== action.surfaceId) };
     case "local/uiHeld":
       return { ...state, uiHeld: [...state.uiHeld, action.surfaceId] };
     case "toolCall":
@@ -361,11 +375,19 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         }),
       );
     case "uiActionDropped":
-      return push({ ...state, uiHeld: unhold(state.uiHeld, action.action) }, (id) => ({
-        kind: "notice",
-        id,
-        text: `Not sent, because the turn was stopped: ${action.action.name} on ${action.action.surfaceId}.`,
-      }));
+      // Stop dropped it, so nothing was sent: the surface unlocks.
+      return push(
+        {
+          ...state,
+          uiHeld: unhold(state.uiHeld, action.action),
+          uiSent: state.uiSent.filter((id) => id !== action.action.surfaceId),
+        },
+        (id) => ({
+          kind: "notice",
+          id,
+          text: `Not sent, because the turn was stopped: ${action.action.name} on ${action.action.surfaceId}.`,
+        }),
+      );
     case "subagent":
       return subagent(state, action.card, action.announced, action.update);
     case "usage":
@@ -597,6 +619,17 @@ function resultTarget<T>(
   return open >= 0 ? open : items.findLastIndex(matches);
 }
 
+/** The surface an A2UI message is about, or `null`. */
+function namedSurface(message: UiMessage): string | null {
+  for (const body of Object.values(message)) {
+    if (body && typeof body === "object" && "surfaceId" in body) {
+      const id = (body as { surfaceId: unknown }).surfaceId;
+      if (typeof id === "string") return id;
+    }
+  }
+  return null;
+}
+
 /** One fewer held press on the action's surface. */
 function unhold(held: string[], action: UiAction): string[] {
   const at = held.indexOf(action.surfaceId);
@@ -610,7 +643,13 @@ function surfaceMessage(
   message: UiMessage,
   toolCallId: string | null,
 ): SessionState {
-  const logged = { ...state, uiLog: [...state.uiLog, message] };
+  // The agent changed the surface: whatever the user sent has been seen, so it unlocks.
+  const named = namedSurface(message);
+  const logged = {
+    ...state,
+    uiLog: [...state.uiLog, message],
+    uiSent: named === null ? state.uiSent : state.uiSent.filter((id) => id !== named),
+  };
   const create = message.createSurface as { surfaceId?: unknown } | undefined;
   const remove = message.deleteSurface as { surfaceId?: unknown } | undefined;
   if (create && typeof create.surfaceId === "string") {

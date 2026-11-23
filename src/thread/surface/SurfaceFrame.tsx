@@ -15,10 +15,23 @@ interface Props {
   held: number;
   /** Answer the waiting turn with "dismissed". */
   onDismiss?: () => void;
+  /** The user sent from it, so it is locked. */
+  sent?: boolean;
+  /** Unlock it to change it and send again. */
+  onResend?: () => void;
   children: ReactNode;
 }
 
-export function SurfaceFrame({ surfaceId, model, waiting, held, onDismiss, children }: Props) {
+export function SurfaceFrame({
+  surfaceId,
+  model,
+  waiting,
+  held,
+  onDismiss,
+  sent = false,
+  onResend,
+  children,
+}: Props) {
   return (
     <section
       aria-label={`Drawn by the agent: ${surfaceId}`}
@@ -38,7 +51,22 @@ export function SurfaceFrame({ surfaceId, model, waiting, held, onDismiss, child
             Sends when the turn ends
           </span>
         )}
+        {sent && held === 0 && (
+          <span className="text-muted" role="status">
+            Sent
+          </span>
+        )}
         <span className="flex-1" />
+        {sent && onResend && (
+          <button
+            type="button"
+            onClick={onResend}
+            className="rounded px-1.5 py-0.5 text-muted hover:bg-panel-2 hover:text-text"
+            title="Unlock this surface to change it and send again"
+          >
+            Change and send again
+          </button>
+        )}
         {waiting && onDismiss && (
           <button
             type="button"

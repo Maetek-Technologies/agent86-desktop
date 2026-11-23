@@ -35,6 +35,9 @@ interface SurfaceThread {
   /** The open question, if it is a surface's wait. */
   waiting: Extract<Question, { kind: "ui" }> | null;
   held: string[];
+  /** Surfaces locked after the user sent from them. */
+  sent: string[];
+  unlock: (surfaceId: string) => void;
   host: (surfaceId: string) => SurfaceHost;
   dismiss: (qid: number) => void;
 }
@@ -87,6 +90,8 @@ export function useSurfaces({ threadId, model, state, onAnswer, onUiAction, onLo
       } else {
         onUiAction(action);
       }
+      // Sent: the surface locks until the agent changes it or the user unlocks it.
+      onLocal({ type: "local/uiSent", surfaceId });
     },
     [runtime, waiting, onAnswer, onUiAction, onLocal],
   );
@@ -98,6 +103,8 @@ export function useSurfaces({ threadId, model, state, onAnswer, onUiAction, onLo
       model,
       waiting,
       held: state.uiHeld,
+      sent: state.uiSent,
+      unlock: (surfaceId) => onLocal({ type: "local/uiUnlock", surfaceId }),
       dismiss: (qid) => onAnswer(qid, { type: "ui", action: null }),
       host: (surfaceId) => ({
         surfaceId,
@@ -105,11 +112,23 @@ export function useSurfaces({ threadId, model, state, onAnswer, onUiAction, onLo
         input: (path, value) => onLocal({ type: "local/uiInput", surfaceId, path, value }),
         press: (node) => press(surfaceId, node),
         workspaceSrc: (path) => surfaceMediaUrl(threadId, path),
+        locked: state.uiSent.includes(surfaceId),
       }),
     }),
     // `state.uiLog` changes whenever the runtime's surfaces do, so entries redraw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runtime, threadId, model, waiting, state.uiHeld, state.uiLog, onAnswer, onLocal, press],
+    [
+      runtime,
+      threadId,
+      model,
+      waiting,
+      state.uiHeld,
+      state.uiSent,
+      state.uiLog,
+      onAnswer,
+      onLocal,
+      press,
+    ],
   );
 
   return { context, link, closeLink: () => setLink(null) };
@@ -128,6 +147,8 @@ export function SurfaceEntryView({ entry }: { entry: SurfaceEntry }) {
       model={thread.model}
       waiting={waiting !== null}
       held={thread.held.filter((id) => id === entry.surfaceId).length}
+      sent={thread.sent.includes(entry.surfaceId)}
+      onResend={() => thread.unlock(entry.surfaceId)}
       onDismiss={waiting ? () => thread.dismiss(waiting.qid) : undefined}
     >
       {tree ? (
