@@ -61,6 +61,7 @@ export type { TrustState } from "./generated/TrustState";
 export type { TrustedProject } from "./generated/TrustedProject";
 export type { TurnInfo } from "./generated/TurnInfo";
 export type { TurnRequest } from "./generated/TurnRequest";
+export type { UiAction } from "./generated/UiAction";
 export type { UiSettings } from "./generated/UiSettings";
 export type { UpdateInfo } from "./generated/UpdateInfo";
 export type { UpdateProgress } from "./generated/UpdateProgress";

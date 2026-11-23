@@ -15,6 +15,7 @@ function opened(threadId: string, history: OpenedThread["history"] = []): Opened
     ownApproval: false,
     sessionId: `s-${threadId}`,
     history,
+    surfaces: [],
     memoryNote: null,
     project: null,
     notes: [],

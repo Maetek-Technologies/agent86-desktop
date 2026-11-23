@@ -11,6 +11,8 @@ mod panel_commands;
 mod secrets;
 mod sessions;
 mod settings;
+mod surface_links;
+mod surface_media;
 mod threads;
 mod trust;
 mod unstable;
@@ -72,6 +74,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // agent86UI surfaces' workspace media, resolved per thread (src/surface_media.rs).
+        .register_asynchronous_uri_scheme_protocol(surface_media::SCHEME, surface_media::handle)
         .manage(threads::ThreadManager::default())
         .manage(desktop::Desktop::default())
         .manage(updates::Updates::default())
@@ -125,6 +129,8 @@ pub fn run() {
             commands::find_files,
             commands::cancel_turn,
             commands::answer,
+            commands::ui_action,
+            commands::open_surface_url,
             commands::close_thread,
             commands::reload_thread,
             commands::set_thread_model,

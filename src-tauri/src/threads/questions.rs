@@ -1,4 +1,5 @@
-//! Questions a turn asks the user mid-way: approvals, limit raises, and secrets.
+//! Questions a turn asks the user mid-way: approvals, limit raises, secrets, and agent86UI
+//! surfaces the model waits on.
 //!
 //! agent86-core's callbacks are synchronous and run on the turn's thread, one at a time. Each one
 //! registers a question with an id, sends it to the UI, and blocks until an answer arrives for
@@ -8,8 +9,9 @@
 
 use super::events::DesktopEvent;
 use crate::unstable::ThreadSecrets;
-use agent86_core::sdk::{ApprovalPreview, LimitHit, SecretRequest};
+use agent86_core::sdk::{Action, ApprovalPreview, LimitHit, SecretRequest, UiWait};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -42,6 +44,47 @@ pub enum Answer {
         #[serde(default)]
         remember: bool,
     },
+    /// What the user did on the surface a `render_ui` call waits on: the button they pressed, or
+    /// `None` when they dismissed it.
+    Ui {
+        action: Option<UiAction>,
+    },
+}
+
+/// A button pressed on an agent86UI surface: A2UI 1.0's `action`, as the renderer builds it.
+/// agent86 checks that the surface is up and holds the component before the model sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UiAction {
+    /// The event's name, from the button's `action.event.name`.
+    pub name: String,
+    pub surface_id: String,
+    /// The button's component id.
+    pub source_component_id: String,
+    /// When it was pressed, as an RFC 3339 date-time.
+    pub timestamp: String,
+    /// The event's `context`, every binding resolved against the surface's data model.
+    #[ts(type = "Record<string, unknown>")]
+    pub context: Map<String, Value>,
+    /// The event's `userMessage`, resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub user_message: Option<String>,
+}
+
+impl From<UiAction> for Action {
+    fn from(action: UiAction) -> Self {
+        let mut built = Action::new(
+            action.name,
+            action.surface_id,
+            action.source_component_id,
+            action.timestamp,
+            action.context,
+        );
+        built.user_message = action.user_message;
+        built
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
@@ -59,6 +102,7 @@ enum Kind {
     Approval,
     Limit,
     Secret,
+    Ui,
 }
 
 impl Answer {
@@ -67,6 +111,7 @@ impl Answer {
             Self::Approval { .. } => Kind::Approval,
             Self::Limit { .. } => Kind::Limit,
             Self::Secret { .. } => Kind::Secret,
+            Self::Ui { .. } => Kind::Ui,
         }
     }
 }
@@ -74,6 +119,8 @@ impl Answer {
 struct Pending {
     kind: Kind,
     reply: mpsc::Sender<Answer>,
+    /// For a UI wait, the surfaces an answer may come from.
+    surfaces: Vec<String>,
 }
 
 /// The open questions of one thread, and what its user allowed for good.
@@ -115,6 +162,17 @@ impl Questions {
         })?;
         if open.kind != answer.kind() {
             return Err(format!("Question {qid} asks something else."));
+        }
+        if let Answer::Ui {
+            action: Some(action),
+        } = &answer
+        {
+            if !open.surfaces.contains(&action.surface_id) {
+                return Err(format!(
+                    "Question {qid} waits on another surface, not {:?}.",
+                    action.surface_id
+                ));
+            }
         }
         let open = pending.remove(&qid).expect("checked above");
         // The asker may have given up (cancelled) a moment ago; then the answer is moot.
@@ -189,8 +247,41 @@ impl Questions {
         }
     }
 
+    /// The agent86UI wait hook: the action the user took on one of the surfaces a `render_ui`
+    /// call drew and waits on, or `None` when they dismissed it or the turn was cancelled.
+    pub fn ui_wait(&self, wait: &UiWait) -> Option<Action> {
+        self.wait_for_action(&wait.surface_ids)
+    }
+
+    /// [`Questions::ui_wait`] for `surfaces` (`UiWait` can only be built by agent86).
+    fn wait_for_action(&self, surfaces: &[String]) -> Option<Action> {
+        let surfaces = surfaces.to_vec();
+        let answer = self.ask_on(Kind::Ui, surfaces.clone(), |qid| {
+            DesktopEvent::UiWaitRequest {
+                qid,
+                surface_ids: surfaces,
+            }
+        });
+        match answer {
+            Some(Answer::Ui {
+                action: Some(action),
+            }) => Some(action.into()),
+            _ => None,
+        }
+    }
+
     /// Put a question to the UI and wait for its answer; `None` when the turn is cancelled.
     fn ask(&self, kind: Kind, event: impl FnOnce(u64) -> DesktopEvent) -> Option<Answer> {
+        self.ask_on(kind, Vec::new(), event)
+    }
+
+    /// [`Questions::ask`], for a question an answer must name one of `surfaces` for.
+    fn ask_on(
+        &self,
+        kind: Kind,
+        surfaces: Vec<String>,
+        event: impl FnOnce(u64) -> DesktopEvent,
+    ) -> Option<Answer> {
         if self.cancelled.load(Ordering::SeqCst) {
             return None;
         }
@@ -200,7 +291,14 @@ impl Questions {
             *next += 1;
             *next
         };
-        lock(&self.pending).insert(qid, Pending { kind, reply });
+        lock(&self.pending).insert(
+            qid,
+            Pending {
+                kind,
+                reply,
+                surfaces,
+            },
+        );
         (self.sink)(event(qid));
 
         let answer = loop {
@@ -372,7 +470,8 @@ mod tests {
         match event {
             DesktopEvent::ApprovalRequest { qid, .. }
             | DesktopEvent::LimitRequest { qid, .. }
-            | DesktopEvent::SecretRequest { qid, .. } => qid,
+            | DesktopEvent::SecretRequest { qid, .. }
+            | DesktopEvent::UiWaitRequest { qid, .. } => qid,
             other => panic!("expected a question, got {other:?}"),
         }
     }
@@ -504,6 +603,75 @@ mod tests {
         }
     }
 
+    fn press(surface: &str) -> UiAction {
+        UiAction {
+            name: "submit".into(),
+            surface_id: surface.into(),
+            source_component_id: "ok".into(),
+            timestamp: "2026-11-22T10:00:00Z".into(),
+            context: serde_json::from_str(r#"{"name":"Ada"}"#).unwrap(),
+            user_message: None,
+        }
+    }
+
+    #[test]
+    fn a_ui_wait_takes_an_action_on_its_own_surfaces_only() {
+        let (q, rx, _) = questions();
+        let asker = q.clone();
+        let waited = std::thread::spawn(move || asker.wait_for_action(&["form".to_owned()]));
+        let event = rx.recv().unwrap();
+        assert!(matches!(
+            &event,
+            DesktopEvent::UiWaitRequest { surface_ids, .. } if surface_ids == &["form"]
+        ));
+        let qid = qid_of(event);
+        // Another surface's button does not answer it, and the question stays open.
+        assert!(q
+            .answer(
+                qid,
+                Answer::Ui {
+                    action: Some(press("other"))
+                }
+            )
+            .is_err());
+        q.answer(
+            qid,
+            Answer::Ui {
+                action: Some(press("form")),
+            },
+        )
+        .unwrap();
+        let action = waited.join().unwrap().expect("the action");
+        assert_eq!(action.name, "submit");
+        assert_eq!(action.surface_id, "form");
+        assert_eq!(action.source_component_id, "ok");
+        assert_eq!(action.context["name"], "Ada");
+    }
+
+    #[test]
+    fn a_dismissed_or_cancelled_ui_wait_gives_no_action() {
+        let (q, rx, cancelled) = questions();
+        let asker = q.clone();
+        let waited = std::thread::spawn(move || asker.wait_for_action(&["form".to_owned()]));
+        let qid = qid_of(rx.recv().unwrap());
+        q.answer(qid, Answer::Ui { action: None }).unwrap();
+        assert!(waited.join().unwrap().is_none());
+        let _closed = rx.recv().unwrap();
+
+        let asker = q.clone();
+        let waited = std::thread::spawn(move || asker.wait_for_action(&["form".to_owned()]));
+        let qid = qid_of(rx.recv().unwrap());
+        cancelled.store(true, Ordering::SeqCst);
+        assert!(waited.join().unwrap().is_none());
+        assert_eq!(
+            rx.recv().unwrap(),
+            DesktopEvent::QuestionClosed {
+                qid,
+                answered: false
+            }
+        );
+    }
+
     #[test]
     fn answers_deserialize_from_the_ui_shape() {
         let answer: Answer =
@@ -512,6 +680,18 @@ mod tests {
             answer,
             Answer::Approval {
                 choice: ApprovalChoice::AllowAlways
+            }
+        );
+        let answer: Answer = serde_json::from_str(
+            r#"{"type":"ui","action":{"name":"submit","surfaceId":"form",
+                "sourceComponentId":"ok","timestamp":"2026-11-22T10:00:00Z",
+                "context":{"name":"Ada"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            answer,
+            Answer::Ui {
+                action: Some(press("form"))
             }
         );
         let answer: Answer = serde_json::from_str(r#"{"type":"secret","value":null}"#).unwrap();

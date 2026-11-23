@@ -13,13 +13,20 @@
 //!
 //! A thread can be rebuilt between turns ([`ThreadHandle::reload`]: new settings, a project just
 //! trusted): a new agent takes over the conversation and the secrets the old one held.
+//!
+//! A button pressed on an agent86UI surface when no call waits on it ([`ThreadHandle::ui_action`])
+//! runs a turn of its own. Pressed while a turn (or a reload) runs, it is held and runs as soon as
+//! that ends, in the order pressed; a cancel drops what is held. Deciding to hold, and the actor
+//! deciding at a turn's end whether anything is held, both happen under the hold's lock, so an
+//! action is never left behind.
 
-use super::events::{DesktopEvent, StopReason, TurnInfo, UsageInfo};
+use super::events::{DesktopEvent, StopReason, TurnInfo, TurnMapper, UsageInfo};
 use super::history::{self, HistoryItem};
-use super::questions::{Answer, Questions};
+use super::questions::{Answer, Questions, UiAction};
 use crate::unstable::{self, ThreadSecrets};
-use agent86_core::sdk::{Agent, AgentBuilder, CancelToken, Turn};
+use agent86_core::sdk::{Agent, AgentBuilder, CancelToken, Turn, Ui};
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -36,8 +43,15 @@ pub type MakeBuilder = Box<dyn FnOnce() -> Result<AgentBuilder, String> + Send>;
 const CANCEL_WATCH_INTERVAL: Duration = Duration::from_millis(20);
 
 enum Command {
-    Prompt(Turn),
+    Run(Work),
     Reload(MakeBuilder, mpsc::Sender<Result<Built, String>>),
+}
+
+/// What a turn starts from.
+enum Work {
+    Prompt(Turn),
+    /// A button pressed on a surface when no call was waiting on it.
+    Action(UiAction),
 }
 
 /// What a thread's agent offers, as built: for the `/` menu and the `/tools`, `/skills`, and
@@ -60,6 +74,9 @@ pub struct ThreadOptions {
     /// Remember secrets for this workspace in the OS keyring and load what was remembered, as
     /// the CLI does. `None` keeps secrets for the thread only (tests never touch the keyring).
     pub keyring_workspace: Option<PathBuf>,
+    /// Offer the model agent86UI (`render_ui` with the A2UI basic catalog); its surfaces arrive
+    /// as [`DesktopEvent::Ui`].
+    pub agent86ui: bool,
 }
 
 /// An agent as built: what the handle keeps of it.
@@ -74,6 +91,8 @@ struct Started {
     built: Built,
     session_id: String,
     history: Vec<HistoryItem>,
+    /// The surfaces the reopened session's history rebuilt (agent86UI).
+    surfaces: Vec<serde_json::Value>,
     /// Secrets remembered for the project and loaded into the thread.
     loaded_secrets: Vec<String>,
 }
@@ -83,6 +102,28 @@ struct Shared {
     busy: AtomicBool,
     /// Shared with [`Questions`] too, so a cancel answers any open question "no".
     cancel_requested: Arc<AtomicBool>,
+    /// Surface actions pressed while the thread was busy, oldest first. Its lock also orders
+    /// `busy` between [`ThreadHandle::ui_action`] and the actor's end of a turn.
+    held: Mutex<VecDeque<UiAction>>,
+}
+
+impl Shared {
+    /// At the end of a turn or a reload: the next held action to run (the thread stays busy),
+    /// or `None` and the thread is free. After a cancel, everything held is dropped and
+    /// returned as the second value.
+    fn next_held(&self, cancelled: bool) -> (Option<UiAction>, Vec<UiAction>) {
+        let mut held = self.held.lock().unwrap_or_else(|p| p.into_inner());
+        let dropped = if cancelled {
+            held.drain(..).collect()
+        } else {
+            Vec::new()
+        };
+        let next = held.pop_front();
+        if next.is_none() {
+            self.busy.store(false, Ordering::SeqCst);
+        }
+        (next, dropped)
+    }
 }
 
 /// The UI side of a thread. Dropping it cancels any running turn and lets the actor exit.
@@ -95,6 +136,8 @@ pub struct ThreadHandle {
     session_id: String,
     /// The reopened session's conversation; taken once by whoever opened the thread.
     history: Mutex<Vec<HistoryItem>>,
+    /// The surfaces its history rebuilt, each as one `createSurface`; taken with the history.
+    surfaces: Mutex<Vec<serde_json::Value>>,
     loaded_secrets: Vec<String>,
 }
 
@@ -107,14 +150,23 @@ fn build(
     sink: &EventSink,
     options: &ThreadOptions,
 ) -> Result<(Agent, Built, Vec<String>), String> {
-    let (approve, limit, secret) = (questions.clone(), questions.clone(), questions.clone());
-    let agent = make()?
+    let (approve, limit, secret, wait) = (
+        questions.clone(),
+        questions.clone(),
+        questions.clone(),
+        questions.clone(),
+    );
+    let mut builder = make()?
         // Every question goes to the UI and waits for its answer (M2).
         .approver(move |tool, preview| approve.approve(tool, preview))
         .on_limit(move |hit| limit.raise_limit(hit))
-        .on_secret_request(move |request| secret.secret(request))
-        .build()
-        .map_err(|error| error.to_string())?;
+        .on_secret_request(move |request| secret.secret(request));
+    if options.agent86ui {
+        // A surface the model waits on is a question like the others: one at a time, and
+        // never once the turn is cancelled.
+        builder = builder.ui(Ui::basic().on_wait(move |request| wait.ui_wait(request)));
+    }
+    let agent = builder.build().map_err(|error| error.to_string())?;
     let secrets = ThreadSecrets::of(&agent);
     let loaded = match &options.keyring_workspace {
         Some(workspace) => secrets.attach_keyring(workspace),
@@ -154,6 +206,7 @@ impl ThreadHandle {
         let shared = Arc::new(Shared {
             busy: AtomicBool::new(false),
             cancel_requested: Arc::new(AtomicBool::new(false)),
+            held: Mutex::new(VecDeque::new()),
         });
         let actor_shared = shared.clone();
         let questions = Questions::new(sink.clone(), shared.cancel_requested.clone());
@@ -190,13 +243,29 @@ impl ThreadHandle {
                     built,
                     session_id: agent.session_id().to_owned(),
                     history: history::from_conversation(agent.conversation()),
+                    // agent86 rebuilt them from the session's `render_ui` calls; nothing of the
+                    // app's own is stored.
+                    surfaces: agent
+                        .surfaces()
+                        .iter()
+                        .filter_map(|message| serde_json::to_value(message).ok())
+                        .collect(),
                     loaded_secrets,
                 };
                 if ready_tx.send(Ok(started)).is_err() {
                     return;
                 }
 
-                while let Ok(command) = inbox.recv() {
+                // A held action the last turn or reload handed on, run before anything new.
+                let mut next: Option<Work> = None;
+                loop {
+                    let command = match next.take() {
+                        Some(work) => Command::Run(work),
+                        None => match inbox.recv() {
+                            Ok(command) => command,
+                            Err(_) => break,
+                        },
+                    };
                     match command {
                         Command::Reload(make, reply) => {
                             let rebuilt = {
@@ -214,15 +283,35 @@ impl ThreadHandle {
                                 // The old agent stays; its vault answers questions again.
                                 questions.set_secrets(secrets.clone());
                             }
-                            actor_shared.busy.store(false, Ordering::SeqCst);
+                            next = actor_shared.next_held(false).0.map(Work::Action);
                             let _ = reply.send(answer);
                         }
-                        Command::Prompt(turn) => {
+                        Command::Run(work) => {
                             let events = sink.clone();
-                            let result = runtime.block_on(async {
-                                let turn = agent.run_with_events(turn, |event| {
-                                    events(DesktopEvent::from_turn_event(&event))
+                            let mut mapper = TurnMapper::default();
+                            let on_event = move |event: agent86_core::sdk::TurnEvent<'_>| {
+                                if let Some(event) = mapper.map(&event) {
+                                    events(event)
+                                }
+                            };
+                            if let Work::Action(action) = &work {
+                                sink(DesktopEvent::UiActionStarted {
+                                    action: action.clone(),
                                 });
+                            }
+                            let result = runtime.block_on(async {
+                                let turn = async {
+                                    match work {
+                                        Work::Prompt(turn) => {
+                                            agent.run_with_events(turn, on_event).await
+                                        }
+                                        Work::Action(action) => {
+                                            agent
+                                                .ui_action_with_events(action.into(), on_event)
+                                                .await
+                                        }
+                                    }
+                                };
                                 let watch = async {
                                     loop {
                                         if actor_shared.cancel_requested.load(Ordering::SeqCst)
@@ -263,10 +352,14 @@ impl ThreadHandle {
                                     error: error.to_string(),
                                 },
                             };
-                            // Free before announcing the end, so the UI can send the next prompt
-                            // as soon as it hears it.
-                            actor_shared.busy.store(false, Ordering::SeqCst);
+                            // Free (unless an action is held) before announcing the end, so the UI
+                            // can send the next prompt as soon as it hears it.
+                            let (held, dropped) = actor_shared.next_held(cancelled);
+                            next = held.map(Work::Action);
                             sink(end);
+                            for action in dropped {
+                                sink(DesktopEvent::UiActionDropped { action });
+                            }
                         }
                     }
                 }
@@ -283,6 +376,7 @@ impl ThreadHandle {
             built: Mutex::new(started.built),
             session_id: started.session_id,
             history: Mutex::new(started.history),
+            surfaces: Mutex::new(started.surfaces),
             loaded_secrets: started.loaded_secrets,
         })
     }
@@ -316,6 +410,16 @@ impl ThreadHandle {
         )
     }
 
+    /// The surfaces the reopened session's history rebuilt, once; empty for a new session.
+    pub fn take_surfaces(&self) -> Vec<serde_json::Value> {
+        std::mem::take(
+            &mut self
+                .surfaces
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+
     /// Start a turn. Refused while one is running: agent86 runs one turn at a time per agent.
     pub fn prompt(&self, turn: impl Into<Turn>) -> Result<(), String> {
         let turn = turn.into();
@@ -330,9 +434,31 @@ impl ThreadHandle {
         if self.shared.busy.swap(true, Ordering::SeqCst) {
             return Err("A turn is already running in this thread.".into());
         }
+        self.start(Work::Prompt(turn))
+    }
+
+    /// Hand the model a button pressed on a surface no call waits on: it runs a turn now, or,
+    /// while the thread is busy, as soon as it is free. Returns whether it was held. agent86
+    /// checks the surface and component when the turn starts (a failure is a `turnFailed`).
+    pub fn ui_action(&self, action: UiAction) -> Result<bool, String> {
+        let mut held = self
+            .shared
+            .held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.shared.busy.swap(true, Ordering::SeqCst) {
+            held.push_back(action);
+            return Ok(true);
+        }
+        drop(held);
+        self.start(Work::Action(action)).map(|()| false)
+    }
+
+    /// Start `work` on the actor; the caller has just made the thread busy.
+    fn start(&self, work: Work) -> Result<(), String> {
         self.shared.cancel_requested.store(false, Ordering::SeqCst);
         self.lock_built().cancel.clear();
-        self.commands.send(Command::Prompt(turn)).map_err(|_| {
+        self.commands.send(Command::Run(work)).map_err(|_| {
             self.shared.busy.store(false, Ordering::SeqCst);
             "This thread has stopped.".to_owned()
         })

@@ -8,8 +8,16 @@ import type {
   LimitInfo,
   SubagentUpdate,
   TurnInfo,
+  UiAction,
   UsageInfo,
 } from "./events.ts";
+
+/** The user message agent86 makes of a surface action: `[ui action] <name> on <surface>: <context>`
+ * (its JSON spacing differs; the transcript shows this text as it is). */
+export function uiActionText(action: UiAction): string {
+  const text = `[ui action] ${action.name} on ${action.surfaceId}: ${JSON.stringify(action.context)}`;
+  return action.userMessage ? `${text}\n${action.userMessage}` : text;
+}
 
 /** A file change shown as a diff: the whole file before (`null` when new) and after. */
 export interface FileDiff {
@@ -113,6 +121,21 @@ export interface TurnSummaryEntry {
   cancelled: boolean;
 }
 
+/** Where an agent86UI surface shows in the transcript: at the `render_ui` call that created it.
+ * Later messages redraw it in place. */
+export interface SurfaceEntry {
+  kind: "surface";
+  id: number;
+  surfaceId: string;
+  /** The call that created it; `null` for one rebuilt when the thread reopened. */
+  toolCallId: string | null;
+  /** The agent deleted it (`deleteSurface`). */
+  deleted: boolean;
+}
+
+/** One A2UI message, as JSON. */
+export type UiMessage = Record<string, unknown>;
+
 export type Entry =
   | UserEntry
   | AgentEntry
@@ -121,7 +144,8 @@ export type Entry =
   | ErrorEntry
   | ToolEntry
   | ListEntry
-  | TurnSummaryEntry;
+  | TurnSummaryEntry
+  | SurfaceEntry;
 
 /** A question the running turn waits on. Rust closes it with `questionClosed`. */
 export type Question =
@@ -134,7 +158,9 @@ export type Question =
       reason: string;
       replacing: boolean;
       canRemember: boolean;
-    };
+    }
+  /** A `render_ui` call waits for the user's first action on one of these surfaces. */
+  | { kind: "ui"; qid: number; surfaceIds: string[] };
 
 export interface SessionState {
   entries: Entry[];
@@ -149,6 +175,14 @@ export interface SessionState {
   lastTurn: TurnInfo | null;
   /** Open questions, oldest first. agent86 asks one at a time, but the list keeps that honest. */
   questions: Question[];
+  /**
+   * agent86UI: the A2UI messages the thread's surfaces are built from, in order: the agent's
+   * (`ui` events) and what the user entered, as `updateDataModel` messages. The renderer's
+   * runtime replays it, so this state stays plain data.
+   */
+  uiLog: UiMessage[];
+  /** Surfaces with a pressed button held for the running turn to end (one per press). */
+  uiHeld: string[];
   nextId: number;
 }
 
@@ -161,6 +195,8 @@ export function initialState(): SessionState {
     lastStep: null,
     lastTurn: null,
     questions: [],
+    uiLog: [],
+    uiHeld: [],
     nextId: 1,
   };
 }
@@ -177,7 +213,15 @@ export type LocalAction =
   | { type: "local/reset" }
   | { type: "local/list"; title: string; items: string[] }
   /** A reopened session's conversation, shown before anything new. */
-  | { type: "local/history"; items: HistoryItem[] };
+  | { type: "local/history"; items: HistoryItem[] }
+  /** The user entered `value` at `path` on a surface (two-way binding, or a local function's
+   * writes as the whole data model at `/`). */
+  | { type: "local/uiInput"; surfaceId: string; path: string; value: unknown }
+  /** A button pressed on a surface is held until the running turn ends. */
+  | { type: "local/uiHeld"; surfaceId: string }
+  /** A reopened session's surfaces, as agent86 rebuilt them (one `createSurface` each), placed
+   * after the history's last `render_ui` call that drew each one. */
+  | { type: "local/surfaces"; messages: UiMessage[] };
 
 export function reduce(state: SessionState, action: DesktopEvent | LocalAction): SessionState {
   switch (action.type) {
@@ -213,6 +257,27 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
       return push(state, (id) => ({ kind: "notice", id, text: action.text.trim() }));
     case "compacted":
       return push(state, (id) => ({ kind: "notice", id, text: action.notice.trim() }));
+    case "ui":
+      return surfaceMessage(state, action.message, action.toolCallId);
+    case "local/uiInput": {
+      const write = {
+        version: "1.0",
+        updateDataModel: { surfaceId: action.surfaceId, path: action.path, value: action.value },
+      };
+      // Typing writes on every key: a write to the same place as the one just before replaces
+      // it, which leaves the surface the same and the log short.
+      const last = state.uiLog.at(-1)?.updateDataModel as
+        { surfaceId?: unknown; path?: unknown } | undefined;
+      const same = last?.surfaceId === action.surfaceId && last?.path === action.path;
+      return {
+        ...state,
+        uiLog: same ? [...state.uiLog.slice(0, -1), write] : [...state.uiLog, write],
+      };
+    }
+    case "local/surfaces":
+      return action.messages.reduce(placeSurface, state);
+    case "local/uiHeld":
+      return { ...state, uiHeld: [...state.uiHeld, action.surfaceId] };
     case "toolCall":
       return push(state, (id) => ({
         kind: "tool",
@@ -267,8 +332,32 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
           },
         ],
       };
+    case "uiWaitRequest":
+      return {
+        ...state,
+        questions: [
+          ...state.questions,
+          { kind: "ui", qid: action.qid, surfaceIds: action.surfaceIds },
+        ],
+      };
     case "questionClosed":
       return closeQuestion(state, action.qid);
+    case "uiActionStarted":
+      // A button pressed on a surface is the user's next message, as agent86 words it.
+      return push(
+        { ...state, running: true, cancelling: false, uiHeld: unhold(state.uiHeld, action.action) },
+        (id) => ({
+          kind: "user",
+          id,
+          text: uiActionText(action.action),
+        }),
+      );
+    case "uiActionDropped":
+      return push({ ...state, uiHeld: unhold(state.uiHeld, action.action) }, (id) => ({
+        kind: "notice",
+        id,
+        text: `Not sent, because the turn was stopped: ${action.action.name} on ${action.action.surfaceId}.`,
+      }));
     case "subagent":
       return subagent(state, action.card, action.announced, action.update);
     case "usage":
@@ -481,6 +570,96 @@ function closeQuestion(state: SessionState, qid: number): SessionState {
         : entry,
     ),
   };
+}
+
+/** One fewer held press on the action's surface. */
+function unhold(held: string[], action: UiAction): string[] {
+  const at = held.indexOf(action.surfaceId);
+  return at < 0 ? held : [...held.slice(0, at), ...held.slice(at + 1)];
+}
+
+/** An A2UI message the agent drew: logged for the runtime, and placed in the transcript when it
+ * creates a surface (at its call) or deletes one. */
+function surfaceMessage(
+  state: SessionState,
+  message: UiMessage,
+  toolCallId: string | null,
+): SessionState {
+  const logged = { ...state, uiLog: [...state.uiLog, message] };
+  const create = message.createSurface as { surfaceId?: unknown } | undefined;
+  const remove = message.deleteSurface as { surfaceId?: unknown } | undefined;
+  if (create && typeof create.surfaceId === "string") {
+    const surfaceId = create.surfaceId;
+    const shown = logged.entries.some(
+      (e) => e.kind === "surface" && e.surfaceId === surfaceId && !e.deleted,
+    );
+    return shown
+      ? logged
+      : push(logged, (id) => ({ kind: "surface", id, surfaceId, toolCallId, deleted: false }));
+  }
+  if (remove && typeof remove.surfaceId === "string") {
+    const surfaceId = remove.surfaceId;
+    return {
+      ...logged,
+      entries: logged.entries.map((e) =>
+        e.kind === "surface" && e.surfaceId === surfaceId && !e.deleted
+          ? { ...e, deleted: true }
+          : e,
+      ),
+    };
+  }
+  return logged;
+}
+
+/** The surface ids a `render_ui` call's arguments name (`messages` may be a JSON string, as
+ * agent86 repairs it). */
+function surfacesDrawnBy(entry: ToolEntry): string[] {
+  let messages: unknown = entry.arguments.messages;
+  if (typeof messages === "string") {
+    try {
+      messages = JSON.parse(messages);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(messages)) return [];
+  return messages.flatMap((message: unknown) =>
+    message && typeof message === "object"
+      ? Object.values(message).flatMap((body: unknown) =>
+          body &&
+          typeof body === "object" &&
+          "surfaceId" in body &&
+          typeof body.surfaceId === "string"
+            ? [body.surfaceId]
+            : [],
+        )
+      : [],
+  );
+}
+
+/** A rebuilt surface: logged, and placed after the last call in the transcript that drew it, or
+ * at the end when compaction left none. */
+function placeSurface(state: SessionState, message: UiMessage): SessionState {
+  const create = message.createSurface as { surfaceId?: unknown } | undefined;
+  const logged = { ...state, uiLog: [...state.uiLog, message] };
+  if (!create || typeof create.surfaceId !== "string") return logged;
+  const surfaceId = create.surfaceId;
+  const at = logged.entries.findLastIndex(
+    (e) => e.kind === "tool" && e.name === "render_ui" && surfacesDrawnBy(e).includes(surfaceId),
+  );
+  const call = logged.entries[at];
+  const entry: SurfaceEntry = {
+    kind: "surface",
+    id: logged.nextId,
+    surfaceId,
+    toolCallId: call?.kind === "tool" ? call.toolCallId : null,
+    deleted: false,
+  };
+  const entries =
+    at < 0
+      ? [...logged.entries, entry]
+      : [...logged.entries.slice(0, at + 1), entry, ...logged.entries.slice(at + 1)];
+  return { ...logged, entries, nextId: logged.nextId + 1 };
 }
 
 function pushHistory(state: SessionState, item: HistoryItem): SessionState {

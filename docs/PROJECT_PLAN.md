@@ -2,7 +2,7 @@
 
 A native desktop app for agent86: a **Tauri 2** shell whose **React** front end is derived from
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
-in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.1.0).
+in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.0).
 
 Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed.
 
@@ -87,7 +87,9 @@ src-tauri/src/
 ├── secrets.rs           # the secrets panel's view of a thread's vault (names only)
 ├── panel_commands.rs    # the memory, secrets, and trust commands
 ├── desktop.rs           # window theme, tray icon with running turns, notifications
-└── file_actions.rs      # open / reveal a thread's files: resolved and checked in Rust
+├── file_actions.rs      # open / reveal a thread's files: resolved and checked in Rust
+├── surface_media.rs     # agent86UI: the agent86-media scheme, workspace media per thread
+└── surface_links.rs     # agent86UI: the http(s)-only check before a surface's link opens
 ```
 
 **Thread actor.** `Agent::run_with_events` takes `&mut self`, and the approver, limit, and secret
@@ -114,6 +116,8 @@ ordered and much faster than global `emit`.
 | approver callback              | `approvalRequest { qid, tool, summary, detail, lexer, warning, change, agent }` → PermissionPanel and DiffView |
 | `on_limit` callback            | `limitRequest { qid, kind, offered }` → limit dialog          |
 | `on_secret_request` callback   | `secretRequest { qid, name, reason, replacing }` → SecretPrompt |
+| `Ui(&AgentMessage)` (1.2.0)    | `ui { toolCallId, message }` → the surface, at its call       |
+| `Ui::on_wait` callback         | `uiWaitRequest { qid, surfaceIds }` → the surface's frame waits |
 | turn end (`RunResult`/`RunError`) | `turnEnded { stopReason, turnSummary, usage }` / `turnFailed { error }` |
 
 **Approvals beyond yes or no.** The SDK approver returns only `bool`. "Allow always for this
@@ -199,6 +203,11 @@ The SDK discovers nothing, so the app decides what to share with the CLI.
   model sees `${secret:NAME}`.
 - **Workspace paths** from the UI are canonicalized in Rust, and `opener` calls must resolve
   inside the thread's workspace.
+- **agent86UI surfaces** are drawn in a frame of their own (dashed, the `--agent` hue), never in
+  the warn-coloured style of agent86's approval and secret panels, and a Modal opens inside it,
+  not over the app. Media loads only from `data:` URLs and the `agent86-media` scheme, which the
+  CSP (`img-src`, `media-src`) allows alongside `'self'`; `asset:` is gone. A link opens only
+  after the user saw the URL, and Rust opens only http and https.
 - **Release builds:** signed (Windows Authenticode, Apple notarization), updater signatures, and
   dependency auditing in CI (`cargo deny` with `src-tauri/deny.toml`, `pnpm audit`).
 
@@ -216,7 +225,7 @@ agent86-desktop/
 │   ├── settings/          # new: providers, keys, limits, MCP, first-run
 │   └── ...                # markdown/, highlight/, tools/, thread/, shell/, secrets/, memory/, trust/
 ├── src-tauri/
-│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.1.0", tokio, serde, ts-rs, keyring
+│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.2.0", tokio, serde, ts-rs, keyring
 │   ├── tauri.conf.json, capabilities/
 │   └── src/               # see 3.1
 └── .github/workflows/     # ci.yml (lint, test, build); release.yml (tauri-action matrix)
@@ -276,6 +285,37 @@ old that came back elevated (UAC off). The sessions panel hides and shows (‹ �
 Mod+B) and resizes from its right edge (180 to 560 px, keys too, double-click resets), kept in
 localStorage as agent86-web keeps it.
 
+**1.1.0: agent86UI.** The agent can draw interactive UI (forms, choices, confirmations): agent86UI,
+agent86's implementation of Google's A2UI 1.0 (ADR 0005 upstream; not affiliated with Google), from
+agent86-core 1.2.0, now pinned. `TurnEvent`, `BuildError`, `RunError`, and `RunResult` became
+`#[non_exhaustive]`; `DesktopEvent::from_turn_event` skips kinds it does not know.
+- *Back end.* Each thread's agent is built with `Ui::basic().on_wait(...)` (`ThreadOptions::agent86ui`).
+  `TurnEvent::Ui` becomes `ui { toolCallId, message }`; the event names no call, so `TurnMapper`
+  gives it the oldest announced call without a result (agent86 announces a step's whole batch, then
+  observes call by call). A waiting call is a `ui` question in `questions.rs`, answered with the
+  user's `UiAction` or a dismissal, only from the surfaces it waits on, and closed on cancel. A
+  press no call waits on goes to `ui_action` (`Agent::ui_action_with_events`): run now, or held
+  while a turn or reload runs and run in order when it ends (the hold and the end of a turn decide
+  under one lock); Stop drops what is held (`uiActionDropped`). On reopen, `OpenedThread.surfaces`
+  is `Agent::surfaces()`: agent86 rebuilt them from the session's history, so nothing is stored.
+- *Front end (`src/thread/surface/`).* A renderer of our own: `@a2ui/react` 0.15.0 speaks 1.0, but
+  draws Lit web components in shadow DOM with Google's theme, and its `openUrl` and media
+  components would all have needed replacing. `runtime/` is agent86-ui's headless runtime ported
+  to TypeScript (data model, bindings, templates, the basic catalog's functions, checks, the regex
+  dialect's safety rules, actions), checked against the same A2UI conformance suites
+  (`runtime/fixtures`, Apache-2.0, commit in `UPSTREAM.md`). The session state keeps the A2UI
+  messages as a log (the agent's, and the user's input as `updateDataModel`), and a memoized
+  runtime applies its new tail. `widgets.tsx` draws the 18 basic components with the app's look
+  (Text as Markdown without HTML, images, or links; icons as glyphs); `SurfaceFrame` names the
+  agent; a surface sits at the call that created it and redraws in place; a `render_ui` card is a
+  one-line note; a reopened surface goes after the last call in the history that drew it.
+- *Safety.* Workspace media goes through `agent86-media://localhost/<thread>/<path>`
+  (`surface_media.rs`): relative paths only, canonicalized inside that thread's workspace, files of
+  media types only, with range requests. A custom scheme rather than Tauri's asset protocol, whose
+  scope is one list for every thread and any file type. Remote media stays off (no setting yet;
+  agent86's `[ui] agent86ui_remote_media` arrives with ACP in 1.2.1). `openUrl` asks first and
+  `open_surface_url` refuses anything but http and https, and links with credentials in them.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives
@@ -295,7 +335,7 @@ localStorage as agent86-web keeps it.
 
 | Risk | Mitigation |
 | --- | --- |
-| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.1.0"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
+| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.2.0"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
 | `local-embeddings` (candle, tokenizers, enabled per D2) roughly doubles dependencies and binary size, and lengthens three-OS CI builds | Cache cargo builds in CI; measure installer size in M0 |
 | Blocking callbacks on the turn thread could deadlock on cancel or close | Cancel and close always resolve pending questions; test it |
 | The UI is coupled to ACP-shaped state (`ToolKind`, `locations`, ACP diff content) | Keep the state shape; derive kind and locations from tool name and args in Rust; use `ApprovalPreview.change` for diffs |

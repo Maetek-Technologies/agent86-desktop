@@ -20,6 +20,9 @@
   --hl-type: #ffcb6b;
   --diff-add: rgba(79, 191, 122, 0.14);
   --diff-del: rgba(239, 107, 107, 0.14);
+  /* agent86UI surfaces: a hue of their own, never the warn colour agent86's own questions use. */
+  --agent: #8b9cff;
+  --agent-tint: rgba(139, 156, 255, 0.06);
   color-scheme: dark;
 }
 
@@ -43,6 +46,8 @@
   --hl-type: #a15c00;
   --diff-add: rgba(31, 138, 76, 0.12);
   --diff-del: rgba(198, 40, 40, 0.1);
+  --agent: #4453c4;
+  --agent-tint: rgba(68, 83, 196, 0.05);
   color-scheme: light;
 }
 
@@ -65,6 +70,8 @@
     --hl-type: #a15c00;
     --diff-add: rgba(31, 138, 76, 0.12);
     --diff-del: rgba(198, 40, 40, 0.1);
+    --agent: #4453c4;
+    --agent-tint: rgba(68, 83, 196, 0.05);
     color-scheme: light;
   }
 }
@@ -78,6 +85,8 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-ok: var(--ok);
+  --color-agent: var(--agent);
+  --color-agent-tint: var(--agent-tint);
   --color-warn: var(--warn);
   --color-error: var(--error);
   --color-diff-add: var(--diff-add);

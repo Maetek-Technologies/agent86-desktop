@@ -13,7 +13,7 @@ use crate::settings::{self, Approval, ProviderPreset, ProviderSettings, Settings
 use crate::threads::actor::{Capabilities, ThreadOptions};
 use crate::threads::history::HistoryItem;
 use crate::threads::manager::{ThreadOverrides, TurnRequest};
-use crate::threads::questions::Answer;
+use crate::threads::questions::{Answer, UiAction};
 use crate::threads::{DesktopEvent, ThreadManager};
 use crate::trust::{self, ProjectStatus, TrustState, TrustStore};
 use crate::updates::{self, UpdateInfo, UpdateProgress};
@@ -30,7 +30,7 @@ use ts_rs::TS;
 
 /// The agent86-core version this build embeds. It matches the exact pin in Cargo.toml; the test
 /// below fails if the two drift apart.
-pub const AGENT86_CORE_VERSION: &str = "1.1.0";
+pub const AGENT86_CORE_VERSION: &str = "1.2.0";
 
 #[derive(Debug, Serialize, PartialEq, Eq, TS)]
 #[ts(export)]
@@ -255,6 +255,10 @@ pub struct OpenedThread {
     pub session_id: String,
     /// A reopened session's conversation; empty for a new one.
     pub history: Vec<HistoryItem>,
+    /// agent86UI: the surfaces the reopened session left up, rebuilt by agent86 from its history,
+    /// each as one A2UI `createSurface` message; empty for a new session.
+    #[ts(type = "Array<Record<string, unknown>>")]
+    pub surfaces: Vec<serde_json::Value>,
     /// Something to know about saving: the embedder fell back, or memory is off.
     pub memory_note: Option<String>,
     /// What the workspace brings (skills, specialists, MCP servers) and whether it is trusted;
@@ -359,6 +363,8 @@ fn open_thread_blocking(
         session_id.as_deref(),
         ThreadOptions {
             keyring_workspace: Some(workspace.clone()),
+            // The app draws agent86UI surfaces (src/thread/surface/).
+            agent86ui: true,
         },
     )?;
     sessions.record_workspace(&opened.session_id, &workspace);
@@ -380,6 +386,7 @@ fn open_thread_blocking(
         own_approval: false,
         session_id: opened.session_id,
         history: opened.history,
+        surfaces: opened.surfaces,
         memory_note,
         project: setup.project,
         notes,
@@ -730,6 +737,41 @@ pub fn answer(
     answer: Answer,
 ) -> Result<(), String> {
     threads.answer(&thread_id, qid, answer)
+}
+
+/// A button pressed on an agent86UI surface that no `render_ui` call waits on: it becomes the
+/// next user message and runs a turn, now or, while one runs, when it ends. Returns whether it
+/// was held. (An action a waiting call asked for is an `answer` instead.)
+#[tauri::command]
+pub fn ui_action(
+    app: tauri::AppHandle,
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+    action: UiAction,
+) -> Result<bool, String> {
+    let held = threads.ui_action(&thread_id, action)?;
+    if held {
+        log::info!("Thread {thread_id}: surface action held for the running turn");
+    } else {
+        log::info!("Thread {thread_id}: turn started (surface action)");
+        desktop::refresh_tray(&app);
+    }
+    Ok(held)
+}
+
+/// Open a link a surface's `openUrl` asked for, after the user saw it and agreed. Only `http`
+/// and `https` (src/surface_links.rs).
+#[tauri::command]
+pub fn open_surface_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let url = crate::surface_links::checked(&url)?;
+    log::info!(
+        "Opening a surface link to {}",
+        url.host_str().unwrap_or_default()
+    );
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

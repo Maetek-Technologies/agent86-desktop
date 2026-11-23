@@ -99,4 +99,15 @@ describe("questions", () => {
     expect(state.running).toBe(true);
     expect(state.entries.at(-1)).toMatchObject({ kind: "error" });
   });
+
+  it("keeps a surface's wait until it closes", () => {
+    const state = fold({ type: "uiWaitRequest", qid: 4, surfaceIds: ["form"] });
+    expect(state.questions).toEqual([{ kind: "ui", qid: 4, surfaceIds: ["form"] }]);
+    expect(
+      fold(
+        { type: "uiWaitRequest", qid: 4, surfaceIds: ["form"] },
+        { type: "questionClosed", qid: 4, answered: true },
+      ).questions,
+    ).toEqual([]);
+  });
 });
