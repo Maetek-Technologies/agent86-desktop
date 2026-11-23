@@ -1316,3 +1316,189 @@ fn a_reopened_session_brings_back_its_surfaces_as_they_were() {
     assert_eq!(create["dataModel"]["name"], "Ada", "drawn as it was last");
     assert!(again.thread.take_surfaces().is_empty(), "taken once");
 }
+
+/// agent86UI against the real model in the CLI's config: the model draws a form and waits; the
+/// test fills it and presses its button as the app's renderer would (agent86-ui's runtime
+/// resolves it), then presses again after the turn. Writes the surfaces to
+/// `/tmp/a86-live-surfaces.json`. Costs a few model calls: `cargo test real_model_agent86ui --
+/// --ignored --nocapture`.
+#[test]
+#[ignore]
+fn real_model_agent86ui() {
+    use agent86_core::sdk::agent86_ui::runtime::{Gesture, Runtime};
+    let path = crate::cli_import::cli_config_path().expect("a home folder");
+    let settings = crate::cli_import::preview(&path)
+        .expect("CLI config")
+        .settings;
+    let setup =
+        crate::agent_factory::model(&settings, &settings.model.default, &crate::keys::OsKeys)
+            .expect("model");
+    eprintln!("model: {}", setup.reference);
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().to_owned();
+    let (tx, events) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let thread = ThreadHandle::spawn(
+        Box::new(move || {
+            Ok(Agent::builder()
+                .provider(setup.provider)
+                .workspace(workspace)
+                .builtins(Builtins::ReadOnly)
+                .approval(ApprovalMode::Ask)
+                .context_window(setup.context_window)
+                .max_output_tokens(setup.max_output_tokens)
+                .max_steps(8))
+        }),
+        Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
+        }),
+        ThreadOptions {
+            agent86ui: true,
+            ..ThreadOptions::default()
+        },
+    )
+    .unwrap();
+    let h = Harness { thread, events };
+    let mut runtime = Runtime::basic();
+    let mut drawn: Vec<Value> = Vec::new();
+
+    // Fill every field bound to an absolute path, then press the first button with an event.
+    let press = |runtime: &mut Runtime, surface: &str| -> Option<UiAction> {
+        let components: Vec<Value> = runtime.components(surface)?.cloned().collect();
+        for component in &components {
+            let Some(path) = component["value"]["@path"].as_str() else {
+                continue;
+            };
+            if !path.starts_with('/') {
+                continue;
+            }
+            let value = match component["component"].as_str() {
+                Some("TextField") if component["variant"] == "number" => json!("4"),
+                Some("TextField") => json!("Ada Lovelace"),
+                Some("Slider") => json!(4),
+                Some("CheckBox") => json!(true),
+                Some("DateTimeInput") => json!("2026-12-03"),
+                Some("ChoicePicker") => json!([component["options"][0]["value"].clone()]),
+                _ => continue,
+            };
+            eprintln!("  fill {} {path} = {value}", component["id"]);
+            runtime.input(surface, path, value).ok()?;
+        }
+        let tree = runtime.tree(surface)?;
+        let button = tree.walk().into_iter().find(|node| {
+            node.component == "Button"
+                && components
+                    .iter()
+                    .any(|c| c["id"] == node.id.as_str() && c["action"].get("event").is_some())
+        })?;
+        let action_json =
+            components.iter().find(|c| c["id"] == button.id.as_str())?["action"].clone();
+        if !button.is_valid() {
+            eprintln!(
+                "  button {} blocked: {:?}",
+                button.id,
+                button.validation_errors()
+            );
+        }
+        let action = runtime
+            .dispatch(&action_json, &Gesture::on(button, surface))
+            .ok()?
+            .action?;
+        eprintln!(
+            "  press {} -> {}",
+            button.id,
+            serde_json::to_string(&action).unwrap()
+        );
+        Some(UiAction {
+            name: action.name,
+            surface_id: action.surface_id,
+            source_component_id: action.source_component_id,
+            timestamp: action.timestamp,
+            context: action.context,
+            user_message: action.user_message,
+        })
+    };
+
+    h.thread
+        .prompt(
+            "I'd like to book a table at a restaurant. Show me a form for my name, the party \
+             size, and the date, with a Book button, and wait for my answer before going on. \
+             Then confirm the booking in one sentence, and leave the form on screen.",
+        )
+        .unwrap();
+    let mut answered = None;
+    let mut seen = Vec::new();
+    loop {
+        let event = h
+            .events
+            .recv_timeout(Duration::from_secs(300))
+            .expect("the turn stalled");
+        eprintln!("{}", serde_json::to_string(&event).unwrap());
+        match &event {
+            DesktopEvent::Ui { message, .. } => {
+                drawn.push(message.clone());
+                let report = runtime.apply(std::slice::from_ref(message));
+                assert!(
+                    report.is_ok(),
+                    "the runtime refused {message}: {:?}",
+                    report.errors
+                );
+            }
+            DesktopEvent::UiWaitRequest { qid, surface_ids } => {
+                let action = press(&mut runtime, &surface_ids[0]).expect("a button to press");
+                answered = Some(action.surface_id.clone());
+                h.thread
+                    .answer(
+                        *qid,
+                        Answer::Ui {
+                            action: Some(action),
+                        },
+                    )
+                    .unwrap();
+            }
+            _ => {}
+        }
+        let end = matches!(
+            event,
+            DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. }
+        );
+        seen.push(event);
+        if end {
+            break;
+        }
+    }
+    std::fs::write(
+        "/tmp/a86-live-surfaces.json",
+        serde_json::to_string_pretty(&drawn).unwrap(),
+    )
+    .unwrap();
+    assert!(!drawn.is_empty(), "the model drew nothing");
+    let surface = answered.expect("the model waited for an answer");
+    assert!(
+        seen.iter().any(|e| matches!(e,
+            DesktopEvent::ToolResult { name, ok: true, output, .. }
+                if name == "render_ui" && output.contains("[ui action]"))),
+        "the action came back as the waiting call's result"
+    );
+    assert!(matches!(seen.last(), Some(DesktopEvent::TurnEnded { .. })));
+
+    // After the turn: a press no call waits on runs a turn of its own.
+    if runtime.surface_ids().any(|id| id == surface) {
+        let action = press(&mut runtime, &surface).expect("the button again");
+        assert!(!h.thread.ui_action(action).unwrap(), "nothing is running");
+        let events = h.until_end();
+        for event in &events {
+            eprintln!("{}", serde_json::to_string(event).unwrap());
+        }
+        assert!(matches!(
+            events.first(),
+            Some(DesktopEvent::UiActionStarted { .. })
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(DesktopEvent::TurnEnded { .. })
+        ));
+    } else {
+        eprintln!("(the model deleted the surface, so no press after the turn)");
+    }
+}
