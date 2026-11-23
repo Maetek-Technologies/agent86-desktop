@@ -47,8 +47,10 @@ pub enum DesktopEvent {
         /// agent86's `[tool] name -> summary` line, without the prefix.
         summary: String,
     },
-    /// One A2UI message a `render_ui` call drew (agent86UI): validated against the basic
-    /// catalog and redacted by agent86 before it got here. `message` is the A2UI 1.0
+    /// One A2UI message a call drew (agent86UI): validated against the basic catalog and
+    /// redacted by agent86 before it got here. A `render_ui` call draws the model's surfaces; an
+    /// `ask_user` call's form (surface `agent86_ask_<n>`) is built by agent86, drawn with a
+    /// `createSurface` and taken down with a `deleteSurface` once answered or dismissed. `message` is the A2UI 1.0
     /// agent-to-renderer message as JSON (`createSurface`, `updateComponents`,
     /// `updateDataModel`, or `deleteSurface`). It arrives after its call's `toolCall` and before
     /// its `toolResult`; `toolCallId` is that call (`None` only if agent86 sent a message
@@ -89,9 +91,9 @@ pub enum DesktopEvent {
         /// Whether the answer may also keep it for the project (an OS keyring is attached).
         can_remember: bool,
     },
-    /// A `render_ui` call drew `surfaceIds` (their `ui` events came first) and the turn waits
-    /// for the user's first action on one of them. Answer with `answer`: the action, or a
-    /// dismissal.
+    /// A call drew `surfaceIds` (their `ui` events came first) and the turn waits for the
+    /// user's first action on one of them: a waiting `render_ui` call, or an `ask_user` call
+    /// waiting on its form's Send. Answer with `answer`: the action, or a dismissal.
     UiWaitRequest {
         #[ts(type = "number")]
         qid: u64,

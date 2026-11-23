@@ -34,7 +34,7 @@ tauri-plugin-window-state = "2"
 # promise (the keyring layout, the embedder, the context-window and price tables, `Memory::store()`;
 # docs/PROJECT_PLAN.md D2, risks), all in src/unstable.rs. Default features stay on: the OS
 # keyring and `local-embeddings`, so memory shared with the CLI uses the CLI's embedder.
-agent86-core = "=1.2.0"
+agent86-core = "=1.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Each thread actor runs its own current-thread runtime (src/threads/actor.rs).

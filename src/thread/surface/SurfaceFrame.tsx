@@ -3,7 +3,13 @@
 // the `agent` hue, which nothing of the app's own uses: agent86's approval and secret panels are
 // solid and warn-coloured. Whatever the model draws stays inside this frame.
 
-import type { ReactNode } from "react";
+//
+// The form agent86 builds for the model's `ask_user` questions is drawn in the same frame, since
+// what it shows (the title, the questions, the options) is still the model's words; only its header
+// differs, naming them as the agent's questions rather than the internal surface id.
+
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import type { AskOutcome } from "../../desktop-client/ask.ts";
 
 interface Props {
   surfaceId: string;
@@ -13,14 +19,22 @@ interface Props {
   waiting: boolean;
   /** Presses held for the running turn to end. */
   held: number;
-  /** Answer the waiting turn with "dismissed". */
+  /** Answer the waiting turn with "dismissed" (also Escape, while it waits). */
   onDismiss?: () => void;
   /** The user sent from it, so it is locked. */
   sent?: boolean;
   /** Unlock it to change it and send again. */
   onResend?: () => void;
+  /** An `ask_user` form: `outcome` once its questions ended (answered, dismissed, or not). */
+  questions?: { outcome: AskOutcome | undefined };
   children: ReactNode;
 }
+
+const OUTCOME: Record<AskOutcome, string> = {
+  answered: "Answered",
+  dismissed: "Dismissed, nothing was sent",
+  unanswered: "Not answered",
+};
 
 export function SurfaceFrame({
   surfaceId,
@@ -30,20 +44,56 @@ export function SurfaceFrame({
   onDismiss,
   sent = false,
   onResend,
+  questions,
   children,
 }: Props) {
+  const body = useRef<HTMLDivElement>(null);
+  const top = useRef<HTMLElement>(null);
+  // A surface the turn waits on takes the keys at once, as the app's own questions do, and its
+  // top comes into view: a long form would otherwise be left scrolled to its end, where the
+  // transcript follows the stream. A frame later, so that follow has run first.
+  useEffect(() => {
+    if (!waiting) return;
+    const first = body.current?.querySelector<HTMLElement>(
+      "input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])",
+    );
+    first?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => top.current?.scrollIntoView?.({ block: "nearest" }));
+    return () => cancelAnimationFrame(frame);
+  }, [waiting]);
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && waiting && onDismiss) {
+      event.preventDefault();
+      event.stopPropagation();
+      onDismiss();
+    }
+  };
+  const heading = questions ? "Questions from the agent" : "Drawn by the agent";
   return (
     <section
-      aria-label={`Drawn by the agent: ${surfaceId}`}
+      aria-label={questions ? heading : `${heading}: ${surfaceId}`}
       data-surface={surfaceId}
+      onKeyDown={onKeyDown}
       className={`my-3 rounded-md border border-dashed bg-agent-tint ${waiting ? "border-agent" : "border-agent/50"}`}
     >
-      <header className="flex items-center gap-2 border-b border-dashed border-agent/40 px-3 py-1 text-xs text-agent">
-        <span aria-hidden>⧉</span>
-        <span className="min-w-0 truncate">Drawn by the agent · {model}</span>
+      <header
+        ref={top}
+        className="flex items-center gap-2 border-b border-dashed border-agent/40 px-3 py-1 text-xs text-agent"
+      >
+        <span aria-hidden>{questions ? "?" : "⧉"}</span>
+        <span className="min-w-0 truncate">
+          {heading} · {model}
+        </span>
         {waiting && (
           <span className="rounded bg-agent/15 px-1.5 py-0.5 text-text" role="status">
-            The agent is waiting for your answer here
+            {questions
+              ? "The agent is waiting for your answers"
+              : "The agent is waiting for your answer here"}
+          </span>
+        )}
+        {questions?.outcome && (
+          <span className="text-muted" role="status">
+            {OUTCOME[questions.outcome]}
           </span>
         )}
         {held > 0 && (
@@ -72,13 +122,19 @@ export function SurfaceFrame({
             type="button"
             onClick={onDismiss}
             className="rounded px-1.5 py-0.5 text-muted hover:bg-panel-2 hover:text-text"
-            title="Let the agent carry on without an answer; the surface stays up"
+            title={
+              questions
+                ? "Close the questions without answering; the agent carries on with what it knows (Esc)"
+                : "Let the agent carry on without an answer; the surface stays up (Esc)"
+            }
           >
             Dismiss
           </button>
         )}
       </header>
-      <div className="p-3">{children}</div>
+      <div ref={body} className="p-3">
+        {children}
+      </div>
     </section>
   );
 }

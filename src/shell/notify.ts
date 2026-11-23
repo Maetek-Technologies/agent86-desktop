@@ -1,5 +1,7 @@
 // When a thread's event deserves a desktop notification: a question waits (approval, limit,
-// secret), or a long turn ended, while the app or that tab is not in front.
+// secret, the agent's questions or a surface it waits on), or a long turn ended, while the app or
+// that tab is not in front.
+import { isAskSurface } from "../desktop-client/ask.ts";
 import type { DesktopEvent } from "../desktop-client/events.ts";
 
 /** A turn at least this long is worth a notification when it ends unseen. */
@@ -41,6 +43,16 @@ export function notificationFor(event: DesktopEvent, context: NotifyContext): No
         title: "Secret requested",
         body: `${context.tab}: the agent asks for ${event.name}.`,
       };
+    case "uiWaitRequest":
+      return event.surfaceIds.some(isAskSurface)
+        ? {
+            title: "Questions from the agent",
+            body: `${context.tab}: the agent has questions for you.`,
+          }
+        : {
+            title: "Answer needed",
+            body: `${context.tab}: the agent is waiting for your answer on a surface it drew.`,
+          };
     case "turnEnded":
       if (!long || event.stopReason === "cancelled") return null;
       return {

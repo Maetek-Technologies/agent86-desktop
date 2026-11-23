@@ -2,6 +2,7 @@
 // a surface drawn in its frame at its place in the transcript.
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { isAskSurface } from "../../desktop-client/ask.ts";
 import { surfaceMediaUrl } from "../../desktop-client/backend.ts";
 import type { Answer, UiAction } from "../../desktop-client/events.ts";
 import type {
@@ -141,18 +142,26 @@ export function SurfaceEntryView({ entry }: { entry: SurfaceEntry }) {
   if (!thread) return null;
   const tree = thread.runtime.tree(entry.surfaceId);
   const waiting = thread.waiting?.surfaceIds.includes(entry.surfaceId) ? thread.waiting : null;
+  // agent86's form for `ask_user` answers only the call waiting on it: it takes input while that
+  // wait is open, and is a locked record of the questions before and after.
+  const asks = isAskSurface(entry.surfaceId);
+  const host = thread.host(entry.surfaceId);
   return (
     <SurfaceFrame
       surfaceId={entry.surfaceId}
       model={thread.model}
       waiting={waiting !== null}
       held={thread.held.filter((id) => id === entry.surfaceId).length}
-      sent={thread.sent.includes(entry.surfaceId)}
-      onResend={() => thread.unlock(entry.surfaceId)}
+      sent={!asks && thread.sent.includes(entry.surfaceId)}
+      onResend={asks ? undefined : () => thread.unlock(entry.surfaceId)}
       onDismiss={waiting ? () => thread.dismiss(waiting.qid) : undefined}
+      questions={asks ? { outcome: entry.outcome } : undefined}
     >
       {tree ? (
-        <NodeView node={tree} host={thread.host(entry.surfaceId)} />
+        <NodeView
+          node={tree}
+          host={asks ? { ...host, locked: host.locked || waiting === null } : host}
+        />
       ) : (
         <span className="text-xs text-muted">Nothing to show yet.</span>
       )}

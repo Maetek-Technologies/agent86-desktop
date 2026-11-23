@@ -1,5 +1,6 @@
 //! Questions a turn asks the user mid-way: approvals, limit raises, secrets, and agent86UI
-//! surfaces the model waits on.
+//! surfaces a call waits on (a waiting `render_ui` call's, or the form agent86 builds for an
+//! `ask_user` call's questions).
 //!
 //! agent86-core's callbacks are synchronous and run on the turn's thread, one at a time. Each one
 //! registers a question with an id, sends it to the UI, and blocks until an answer arrives for
@@ -44,8 +45,9 @@ pub enum Answer {
         #[serde(default)]
         remember: bool,
     },
-    /// What the user did on the surface a `render_ui` call waits on: the button they pressed, or
-    /// `None` when they dismissed it.
+    /// What the user did on the surface a call waits on: the button they pressed (for an
+    /// `ask_user` form, its Send, whose context holds the answers), or `None` when they
+    /// dismissed it.
     Ui {
         action: Option<UiAction>,
     },
@@ -247,8 +249,11 @@ impl Questions {
         }
     }
 
-    /// The agent86UI wait hook: the action the user took on one of the surfaces a `render_ui`
-    /// call drew and waits on, or `None` when they dismissed it or the turn was cancelled.
+    /// The agent86UI wait hook: the action the user took on one of the surfaces a call drew and
+    /// waits on, or `None` when they dismissed it or the turn was cancelled. Since agent86-core
+    /// 1.2.2 it also answers `ask_user`: agent86 draws its form (`agent86_ask_<n>`) as `ui`
+    /// events, asks here for that surface, takes `Some` as the user's answers (the action of the
+    /// form's Send, event `answers`) and `None` as "dismissed", and then takes the form down.
     pub fn ui_wait(&self, wait: &UiWait) -> Option<Action> {
         self.wait_for_action(&wait.surface_ids)
     }

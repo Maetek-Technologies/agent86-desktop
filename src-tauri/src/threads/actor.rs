@@ -74,8 +74,9 @@ pub struct ThreadOptions {
     /// Remember secrets for this workspace in the OS keyring and load what was remembered, as
     /// the CLI does. `None` keeps secrets for the thread only (tests never touch the keyring).
     pub keyring_workspace: Option<PathBuf>,
-    /// Offer the model agent86UI (`render_ui` with the A2UI basic catalog); its surfaces arrive
-    /// as [`DesktopEvent::Ui`].
+    /// Offer the model agent86UI (`render_ui` with the A2UI basic catalog), and with it, since
+    /// agent86-core 1.2.2, `ask_user`, whose questions agent86 builds into a form of the same
+    /// catalog. Their surfaces arrive as [`DesktopEvent::Ui`].
     pub agent86ui: bool,
 }
 
@@ -162,8 +163,10 @@ fn build(
         .on_limit(move |hit| limit.raise_limit(hit))
         .on_secret_request(move |request| secret.secret(request));
     if options.agent86ui {
-        // A surface the model waits on is a question like the others: one at a time, and
-        // never once the turn is cancelled.
+        // A surface a call waits on is a question like the others: one at a time, and never
+        // once the turn is cancelled. That is a waiting `render_ui` call's surface, or the form
+        // agent86 builds for `ask_user` (offered because this `Ui` can wait and has the basic
+        // catalog; agent86 draws it, waits here, and takes it down, with no code of ours).
         builder = builder.ui(Ui::basic().on_wait(move |request| wait.ui_wait(request)));
     }
     let agent = builder.build().map_err(|error| error.to_string())?;

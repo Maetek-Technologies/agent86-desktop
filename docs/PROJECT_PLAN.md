@@ -2,7 +2,7 @@
 
 A native desktop app for agent86: a **Tauri 2** shell whose **React** front end is derived from
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
-in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.0).
+in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.2).
 
 Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed.
 
@@ -116,8 +116,8 @@ ordered and much faster than global `emit`.
 | approver callback              | `approvalRequest { qid, tool, summary, detail, lexer, warning, change, agent }` → PermissionPanel and DiffView |
 | `on_limit` callback            | `limitRequest { qid, kind, offered }` → limit dialog          |
 | `on_secret_request` callback   | `secretRequest { qid, name, reason, replacing }` → SecretPrompt |
-| `Ui(&AgentMessage)` (1.2.0)    | `ui { toolCallId, message }` → the surface, at its call       |
-| `Ui::on_wait` callback         | `uiWaitRequest { qid, surfaceIds }` → the surface's frame waits |
+| `Ui(&AgentMessage)` (1.2.0)    | `ui { toolCallId, message }` → the surface, at its call (`render_ui`, or `ask_user`'s form from 1.2.2) |
+| `Ui::on_wait` callback         | `uiWaitRequest { qid, surfaceIds }` → the surface's frame waits (an `agent86_ask_` surface: the agent's questions) |
 | turn end (`RunResult`/`RunError`) | `turnEnded { stopReason, turnSummary, usage }` / `turnFailed { error }` |
 
 **Approvals beyond yes or no.** The SDK approver returns only `bool`. "Allow always for this
@@ -225,7 +225,7 @@ agent86-desktop/
 │   ├── settings/          # new: providers, keys, limits, MCP, first-run
 │   └── ...                # markdown/, highlight/, tools/, thread/, shell/, secrets/, memory/, trust/
 ├── src-tauri/
-│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.2.0", tokio, serde, ts-rs, keyring
+│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.2.2", tokio, serde, ts-rs, keyring
 │   ├── tauri.conf.json, capabilities/
 │   └── src/               # see 3.1
 └── .github/workflows/     # ci.yml (lint, test, build); release.yml (tauri-action matrix)
@@ -323,6 +323,41 @@ again** to unlock. Any message from the agent naming the surface unlocks it, as 
 that Stop dropped. A press that only runs a local function (`openUrl`) does not lock. A reopened
 session's surfaces start unlocked (nothing is stored).
 
+**1.1.2: questions from the agent (`ask_user`); agent86-core 1.2.2.** agent86 1.2.2 adds
+`ask_user` (ADR 0006 upstream): the model sends a short, flat list of questions and agent86 builds
+the form itself, so it is always valid. It is offered to any `Ui` with `on_wait` and the basic
+catalog, so the threads get it with no new sdk API (and no way to leave it out while keeping
+`render_ui`). The form arrives as `ui` events for surface `agent86_ask_<n>` (a `createSurface`: a
+Column of the title, an input per question bound to `/answers/<id>`, an "Other" field bound to
+`/other/<id>` per choice question, and a Send button, event `answers`, whose one `@checks` rule
+holds it until every required question is answered), then an ordinary `uiWaitRequest` through the
+same `on_wait` hook, then a `deleteSurface` before the call's result ("The user answered:" and the
+answers as JSON, or a dismissal). `Agent::surfaces` never lists it and a reopened session does not
+redraw it; `render_ui` refuses the prefix.
+- *Back end.* Nothing new: `TurnMapper` already ties the form's messages to the `ask_user` call
+  (the oldest open one, even when the batch announced later calls), and `Questions::ui_wait`
+  answers its wait like a `render_ui` wait (only from that surface, closed on cancel). The
+  scripted thread tests press Send through agent86-ui's headless runtime and check the order of
+  events and the observation the model gets, and cover dismissal and Stop.
+- *Front end.* A surface is now placed right after the card of the call its `ui` event names
+  (`toolCallId`), not at the end, so a form sits at its `ask_user` call even in a batch. The frame
+  of an `agent86_ask_` surface is headed **Questions from the agent** (never the internal id), in
+  the same agent frame as any surface, since the questions are still the model's words. It takes
+  input only while its wait is open. agent86's `deleteSurface` for it does not remove it: the
+  reducer moves its log messages to an id of its own (`agent86_ask_<n>~<entry id>`, because a
+  reload rebuilds the agent and its forms count from 1 again) and keeps it, locked, as the record
+  of what was asked and answered, with the outcome the call's result names (answered, dismissed,
+  not answered). The `ask_user` card (`AskUserCard`) lists the questions and the answers as text,
+  folded while the form shows them, open when no form is shown (a reopened session).
+- *Any waiting surface* now takes the focus when its wait opens, and Esc in it dismisses it, as the
+  app's own question panels do. A wait notifies like the app's own questions (**Questions from
+  the agent**, or **Answer needed** for a `render_ui` wait).
+- *Other 1.2.2 changes* need nothing here: `render_ui` fills in a missing Button `context`, reads
+  `{"path": ...}` as `@path`, refuses a waiting call with no event Button, and moves fields placed
+  beside a message's kind inside it; broken tool-call JSON gets a longer error and is replayed as
+  `{}`; `Tool::retry_hint` is a provided method. `TurnEvent` and agent86-ui's runtime (which
+  `runtime/` ports) are unchanged, and `unstable.rs` builds as it was.
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives
@@ -342,7 +377,7 @@ session's surfaces start unlocked (nothing is stored).
 
 | Risk | Mitigation |
 | --- | --- |
-| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.2.0"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
+| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.2.2"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
 | `local-embeddings` (candle, tokenizers, enabled per D2) roughly doubles dependencies and binary size, and lengthens three-OS CI builds | Cache cargo builds in CI; measure installer size in M0 |
 | Blocking callbacks on the turn thread could deadlock on cancel or close | Cancel and close always resolve pending questions; test it |
 | The UI is coupled to ACP-shaped state (`ToolKind`, `locations`, ACP diff content) | Keep the state shape; derive kind and locations from tool name and args in Rust; use `ApprovalPreview.change` for diffs |

@@ -25,13 +25,41 @@ enum Reply {
 
 struct Scripted {
     replies: Mutex<VecDeque<Reply>>,
+    /// Every request the agent sent, so a test can see what the model was shown.
+    requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl Scripted {
     fn new(replies: Vec<Reply>) -> Arc<Self> {
         Arc::new(Self {
             replies: Mutex::new(replies.into()),
+            requests: Mutex::new(Vec::new()),
         })
+    }
+
+    /// What the model was shown as call `id`'s result in the last request that had it.
+    fn observation(&self, id: &str) -> Option<String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|request| {
+                request
+                    .messages
+                    .iter()
+                    .find(|message| message.tool_call_id.as_deref() == Some(id))
+                    .map(|message| message.content.clone())
+            })
+    }
+
+    /// The tools the first request offered.
+    fn offered(&self) -> Vec<String> {
+        self.requests.lock().unwrap()[0]
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect()
     }
 }
 
@@ -44,7 +72,8 @@ impl Provider for Scripted {
         "scripted-model"
     }
 
-    fn stream(&self, _request: CompletionRequest) -> DeltaStream<'_> {
+    fn stream(&self, request: CompletionRequest) -> DeltaStream<'_> {
+        self.requests.lock().unwrap().push(request);
         let reply = self
             .replies
             .lock()
@@ -152,7 +181,24 @@ fn spawn(
     configure: fn(AgentBuilder) -> AgentBuilder,
     options: ThreadOptions,
 ) -> Result<Harness, String> {
-    let provider: Arc<dyn Provider> = Scripted::new(replies);
+    spawn_on(
+        Scripted::new(replies),
+        workspace,
+        builtins,
+        configure,
+        options,
+    )
+}
+
+/// [`spawn`], on a provider the test keeps, to see what the model was sent.
+fn spawn_on(
+    provider: Arc<Scripted>,
+    workspace: &Path,
+    builtins: Builtins,
+    configure: fn(AgentBuilder) -> AgentBuilder,
+    options: ThreadOptions,
+) -> Result<Harness, String> {
+    let provider: Arc<dyn Provider> = provider;
     let workspace = workspace.to_owned();
     let (tx, events) = mpsc::channel();
     let tx = Mutex::new(tx);
@@ -953,20 +999,16 @@ fn name_form() -> Value {
 }
 
 #[test]
-fn render_ui_is_offered_only_when_the_thread_draws() {
+fn render_ui_and_ask_user_are_offered_only_when_the_thread_draws() {
     let dir = tempfile::tempdir().unwrap();
+    let offers = |h: &Harness, tool: &str| h.thread.capabilities().tools.contains(&tool.to_owned());
     let plain = start(vec![], dir.path(), Builtins::ReadOnly).unwrap();
-    assert!(!plain
-        .thread
-        .capabilities()
-        .tools
-        .contains(&"render_ui".to_owned()));
+    assert!(!offers(&plain, "render_ui"));
+    assert!(!offers(&plain, "ask_user"));
+    // agent86-core 1.2.2 offers `ask_user` to any `Ui` with `on_wait` and the basic catalog.
     let drawing = start_ui(vec![], dir.path()).unwrap();
-    assert!(drawing
-        .thread
-        .capabilities()
-        .tools
-        .contains(&"render_ui".to_owned()));
+    assert!(offers(&drawing, "render_ui"));
+    assert!(offers(&drawing, "ask_user"));
 }
 
 #[test]
@@ -1156,6 +1198,231 @@ fn cancel_while_a_surface_waits_closes_the_question_and_ends_the_turn() {
         qid,
         answered: false
     }));
+    assert!(matches!(
+        events.last(),
+        Some(DesktopEvent::TurnEnded {
+            stop_reason: StopReason::Cancelled,
+            ..
+        })
+    ));
+}
+
+// `ask_user` (agent86-core 1.2.2, ADR 0006 upstream): the model sends questions, agent86 builds
+// the form and draws it as `ui` events for surface `agent86_ask_<n>`, waits through the same
+// `on_wait` hook as a waiting `render_ui` call, and takes the form down once it is answered.
+
+/// `ask_user`'s arguments: the release notes' weekend trip, one question of each shape the form
+/// treats differently (a field, options with "Other", an optional number).
+fn trip_questions() -> Value {
+    json!({"title": "Your weekend trip", "questions": [
+        {"id": "from", "question": "Where are you leaving from?", "kind": "text"},
+        {"id": "style", "question": "What kind of trip?", "kind": "choice",
+         "options": ["City and culture", "Outdoors"]},
+        {"id": "nights", "question": "How many nights?", "kind": "number", "optional": true}
+    ]})
+}
+
+/// A thread whose model calls `ask_user` first in a batch with `list_dir`, then says `answer`.
+fn asking(dir: &Path, answer: &'static str) -> (Harness, Arc<Scripted>) {
+    let provider = Scripted::new(vec![
+        Reply::Calls(vec![
+            ("c1", "ask_user", trip_questions()),
+            ("c2", "list_dir", json!({"path": "."})),
+        ]),
+        Reply::Text(answer),
+    ]);
+    let h = spawn_on(
+        provider.clone(),
+        dir,
+        Builtins::Files,
+        |builder| builder,
+        ThreadOptions {
+            agent86ui: true,
+            ..ThreadOptions::default()
+        },
+    )
+    .unwrap();
+    h.thread
+        .prompt("Plan a weekend trip for me. Ask me what you need to know first.")
+        .unwrap();
+    (h, provider)
+}
+
+/// Events up to and including the next question, every `ui` message applied to `runtime` as the
+/// app's renderer applies them.
+fn until_question_drawn(h: &Harness, runtime: &mut Runtime) -> Vec<DesktopEvent> {
+    let mut seen = Vec::new();
+    loop {
+        let event = h
+            .events
+            .recv_timeout(TURN_TIMEOUT)
+            .unwrap_or_else(|_| panic!("no question came; saw {seen:#?}"));
+        if let DesktopEvent::Ui { message, .. } = &event {
+            let report = runtime.apply(std::slice::from_ref(message));
+            assert!(report.is_ok(), "{message}: {:?}", report.errors);
+        }
+        let asked = matches!(event, DesktopEvent::UiWaitRequest { .. });
+        seen.push(event);
+        if asked {
+            return seen;
+        }
+    }
+}
+
+/// The order of what a turn showed: calls, results, `ui` messages (with their call), and the
+/// questions about them.
+fn story(events: &[DesktopEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            DesktopEvent::ToolCall { id, name, .. } => Some(format!("call {id} {name}")),
+            DesktopEvent::ToolResult { id, ok, .. } => Some(format!("result {id} {ok}")),
+            DesktopEvent::Ui {
+                tool_call_id,
+                message,
+            } => {
+                let (kind, body) = message.as_object()?.iter().find(|(k, _)| *k != "version")?;
+                Some(format!(
+                    "ui {} {kind} {}",
+                    tool_call_id.as_deref().unwrap_or("-"),
+                    body["surfaceId"].as_str().unwrap_or("-")
+                ))
+            }
+            DesktopEvent::UiWaitRequest { surface_ids, .. } => {
+                Some(format!("wait {}", surface_ids.join(",")))
+            }
+            DesktopEvent::QuestionClosed { answered, .. } => Some(format!("closed {answered}")),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_agents_questions_are_drawn_answered_from_the_form_and_reach_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, provider) = asking(dir.path(), "A food tour from Boston, then.");
+    let mut runtime = Runtime::basic();
+    let mut events = until_question_drawn(&h, &mut runtime);
+    let Some(DesktopEvent::UiWaitRequest { qid, surface_ids }) = events.last().cloned() else {
+        unreachable!()
+    };
+    assert_eq!(surface_ids, ["agent86_ask_1"]);
+    let surface = "agent86_ask_1";
+
+    // The form as agent86 built it: an input per question bound under /answers, an "Other" field
+    // for the choice question, and Send, held back until every required question is answered.
+    let send = |runtime: &Runtime| runtime.node(surface, "send").expect("a Send button");
+    let components: Vec<Value> = runtime.components(surface).unwrap().cloned().collect();
+    let bound = |id: &str| {
+        components.iter().find(|c| c["id"] == id).unwrap()["value"]["@path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(bound("q_from"), "/answers/from");
+    assert_eq!(bound("o_style"), "/other/style");
+    assert!(
+        !send(&runtime).is_valid(),
+        "Send waits for the required answers"
+    );
+
+    // The user answers as the renderer writes input: a place, and "Other" in their own words.
+    runtime
+        .input(surface, "/answers/from", json!("Boston"))
+        .unwrap();
+    runtime
+        .input(surface, "/answers/style", json!(["__other__"]))
+        .unwrap();
+    runtime
+        .input(surface, "/other/style", json!("A food tour"))
+        .unwrap();
+    let button = send(&runtime);
+    assert!(button.is_valid(), "{:?}", button.validation_errors());
+    let action_json = components.iter().find(|c| c["id"] == "send").unwrap()["action"].clone();
+    let action = runtime
+        .dispatch(&action_json, &Gesture::on(&button, surface))
+        .unwrap()
+        .action
+        .expect("Send sends an action");
+    assert_eq!(action.name, "answers");
+    h.thread
+        .answer(
+            qid,
+            Answer::Ui {
+                action: Some(UiAction {
+                    name: action.name,
+                    surface_id: action.surface_id,
+                    source_component_id: action.source_component_id,
+                    timestamp: action.timestamp,
+                    context: action.context,
+                    user_message: action.user_message,
+                }),
+            },
+        )
+        .unwrap();
+    events.extend(h.until_end());
+
+    // Drawn at its own call though list_dir was announced after it, asked, then taken down
+    // before its result.
+    assert_eq!(
+        story(&events),
+        [
+            "call c1 ask_user",
+            "call c2 list_dir",
+            "ui c1 createSurface agent86_ask_1",
+            "wait agent86_ask_1",
+            "closed true",
+            "ui c1 deleteSurface agent86_ask_1",
+            "result c1 true",
+            "result c2 true",
+        ]
+    );
+    let answered = "The user answered:\n\
+        {\"from\": \"Boston\", \"style\": \"A food tour\", \"nights\": null}\n\
+        In their own words, not one of the options: style.";
+    assert_eq!(tool_output(&events, "c1"), (true, answered.to_owned()));
+    assert_eq!(provider.observation("c1").as_deref(), Some(answered));
+    assert!(provider.offered().contains(&"ask_user".to_owned()));
+    assert_eq!(agent_text(&events), "A food tour from Boston, then.");
+    // The form is agent86's, not one of the agent's surfaces: a reopened thread would not get it.
+    assert!(h.thread.take_surfaces().is_empty());
+}
+
+#[test]
+fn dismissing_the_questions_tells_the_agent_and_the_turn_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, provider) = asking(dir.path(), "I'll suggest something general.");
+    let (qid, _) = h.until_question();
+    h.thread.answer(qid, Answer::Ui { action: None }).unwrap();
+    let events = h.until_end();
+    assert!(events.contains(&DesktopEvent::QuestionClosed {
+        qid,
+        answered: true
+    }));
+    // Taken down all the same, and not a failure: the agent is told to go on without answers.
+    assert!(story(&events).contains(&"ui c1 deleteSurface agent86_ask_1".to_owned()));
+    let (ok, output) = tool_output(&events, "c1");
+    assert!(ok, "{output}");
+    assert!(
+        output.starts_with("The user closed the form without answering."),
+        "{output}"
+    );
+    assert_eq!(provider.observation("c1"), Some(output));
+    assert_eq!(agent_text(&events), "I'll suggest something general.");
+}
+
+#[test]
+fn stopping_while_the_questions_wait_takes_the_form_down_and_ends_the_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _) = asking(dir.path(), "(not reached)");
+    let (qid, _) = h.until_question();
+    h.thread.cancel();
+    let events = h.until_end();
+    assert!(events.contains(&DesktopEvent::QuestionClosed {
+        qid,
+        answered: false
+    }));
+    assert!(story(&events).contains(&"ui c1 deleteSurface agent86_ask_1".to_owned()));
     assert!(matches!(
         events.last(),
         Some(DesktopEvent::TurnEnded {
