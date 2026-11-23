@@ -1317,15 +1317,21 @@ fn a_reopened_session_brings_back_its_surfaces_as_they_were() {
     assert!(again.thread.take_surfaces().is_empty(), "taken once");
 }
 
-/// agent86UI against the real model in the CLI's config: the model draws a form and waits; the
-/// test fills it and presses its button as the app's renderer would (agent86-ui's runtime
-/// resolves it), then presses again after the turn. Writes the surfaces to
-/// `/tmp/a86-live-surfaces.json`. Costs a few model calls: `cargo test real_model_agent86ui --
-/// --ignored --nocapture`.
-#[test]
-#[ignore]
-fn real_model_agent86ui() {
-    use agent86_core::sdk::agent86_ui::runtime::{Gesture, Runtime};
+// agent86UI against the real model in the CLI's config (`~/.agent86/config.toml` and the keyring),
+// through the thread actor with agent86UI on. The test stands in for the user: agent86-ui's
+// runtime resolves each surface as the app's renderer does, fills its fields, and presses its
+// button. Ignored by default (they call the model): `cargo test real_model_agent86ui --
+// --ignored --nocapture`.
+
+use agent86_core::sdk::agent86_ui::runtime::{Gesture, Runtime};
+
+/// A thread on the CLI's default model, drawing with agent86UI; saved to `memory` (continuing
+/// session `resume`) if given.
+fn live_thread(
+    workspace: &Path,
+    memory: Option<agent86_core::sdk::Memory>,
+    resume: Option<String>,
+) -> Harness {
     let path = crate::cli_import::cli_config_path().expect("a home folder");
     let settings = crate::cli_import::preview(&path)
         .expect("CLI config")
@@ -1334,20 +1340,26 @@ fn real_model_agent86ui() {
         crate::agent_factory::model(&settings, &settings.model.default, &crate::keys::OsKeys)
             .expect("model");
     eprintln!("model: {}", setup.reference);
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = dir.path().to_owned();
+    let workspace = workspace.to_owned();
     let (tx, events) = mpsc::channel();
     let tx = Mutex::new(tx);
     let thread = ThreadHandle::spawn(
         Box::new(move || {
-            Ok(Agent::builder()
+            let mut builder = Agent::builder()
                 .provider(setup.provider)
                 .workspace(workspace)
                 .builtins(Builtins::ReadOnly)
                 .approval(ApprovalMode::Ask)
                 .context_window(setup.context_window)
                 .max_output_tokens(setup.max_output_tokens)
-                .max_steps(8))
+                .max_steps(8);
+            if let Some(memory) = memory {
+                builder = builder.memory(memory);
+            }
+            if let Some(id) = resume {
+                builder = builder.session(id);
+            }
+            Ok(builder)
         }),
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
@@ -1358,82 +1370,88 @@ fn real_model_agent86ui() {
         },
     )
     .unwrap();
-    let h = Harness { thread, events };
-    let mut runtime = Runtime::basic();
-    let mut drawn: Vec<Value> = Vec::new();
+    Harness { thread, events }
+}
 
-    // Fill every field bound to an absolute path, then press the first button with an event.
-    let press = |runtime: &mut Runtime, surface: &str| -> Option<UiAction> {
-        let components: Vec<Value> = runtime.components(surface)?.cloned().collect();
-        for component in &components {
-            let Some(path) = component["value"]["@path"].as_str() else {
-                continue;
-            };
-            if !path.starts_with('/') {
-                continue;
-            }
-            let value = match component["component"].as_str() {
-                Some("TextField") if component["variant"] == "number" => json!("4"),
-                Some("TextField") => json!("Ada Lovelace"),
-                Some("Slider") => json!(4),
-                Some("CheckBox") => json!(true),
-                Some("DateTimeInput") => json!("2026-12-03"),
-                Some("ChoicePicker") => json!([component["options"][0]["value"].clone()]),
-                _ => continue,
-            };
-            eprintln!("  fill {} {path} = {value}", component["id"]);
-            runtime.input(surface, path, value).ok()?;
+/// Fill every field of `surface` bound to an absolute path, then press its first button with an
+/// event, as the renderer would: the action, with its context resolved.
+fn live_press(runtime: &mut Runtime, surface: &str) -> Option<UiAction> {
+    let components: Vec<Value> = runtime.components(surface)?.cloned().collect();
+    for component in &components {
+        let Some(path) = component["value"]["@path"].as_str() else {
+            continue;
+        };
+        if !path.starts_with('/') {
+            continue;
         }
-        let tree = runtime.tree(surface)?;
-        let button = tree.walk().into_iter().find(|node| {
-            node.component == "Button"
-                && components
-                    .iter()
-                    .any(|c| c["id"] == node.id.as_str() && c["action"].get("event").is_some())
-        })?;
-        let action_json =
-            components.iter().find(|c| c["id"] == button.id.as_str())?["action"].clone();
-        if !button.is_valid() {
-            eprintln!(
-                "  button {} blocked: {:?}",
-                button.id,
-                button.validation_errors()
-            );
-        }
-        let action = runtime
-            .dispatch(&action_json, &Gesture::on(button, surface))
-            .ok()?
-            .action?;
+        let value = match component["component"].as_str() {
+            Some("TextField") if component["variant"] == "number" => json!("4"),
+            Some("TextField") => json!("Ada Lovelace"),
+            Some("Slider") => json!(4),
+            Some("CheckBox") => json!(true),
+            Some("DateTimeInput") => json!("2026-12-03"),
+            Some("ChoicePicker") => json!([component["options"][0]["value"].clone()]),
+            _ => continue,
+        };
+        eprintln!("  fill {} {path} = {value}", component["id"]);
+        runtime.input(surface, path, value).ok()?;
+    }
+    let tree = runtime.tree(surface)?;
+    let button = tree.walk().into_iter().find(|node| {
+        node.component == "Button"
+            && components
+                .iter()
+                .any(|c| c["id"] == node.id.as_str() && c["action"].get("event").is_some())
+    })?;
+    let action_json = components.iter().find(|c| c["id"] == button.id.as_str())?["action"].clone();
+    if !button.is_valid() {
         eprintln!(
-            "  press {} -> {}",
+            "  button {} blocked: {:?}",
             button.id,
-            serde_json::to_string(&action).unwrap()
+            button.validation_errors()
         );
-        Some(UiAction {
-            name: action.name,
-            surface_id: action.surface_id,
-            source_component_id: action.source_component_id,
-            timestamp: action.timestamp,
-            context: action.context,
-            user_message: action.user_message,
-        })
-    };
+    }
+    let action = runtime
+        .dispatch(&action_json, &Gesture::on(button, surface))
+        .ok()?
+        .action?;
+    eprintln!(
+        "  press {} -> {}",
+        button.id,
+        serde_json::to_string(&action).unwrap()
+    );
+    Some(UiAction {
+        name: action.name,
+        surface_id: action.surface_id,
+        source_component_id: action.source_component_id,
+        timestamp: action.timestamp,
+        context: action.context,
+        user_message: action.user_message,
+    })
+}
 
-    h.thread
-        .prompt(
-            "I'd like to book a table at a restaurant. Show me a form for my name, the party \
-             size, and the date, with a Book button, and wait for my answer before going on. \
-             Then confirm the booking in one sentence, and leave the form on screen.",
-        )
-        .unwrap();
-    let mut answered = None;
+/// Events until `turns` turns have ended, each printed. Surfaces are applied to `runtime` and
+/// kept in `drawn`; `on_wait` answers a surface's wait (its question id and surfaces).
+fn live_turns(
+    h: &Harness,
+    turns: usize,
+    runtime: &mut Runtime,
+    drawn: &mut Vec<Value>,
+    mut on_wait: impl FnMut(&mut Runtime, u64, &[String]),
+) -> Vec<DesktopEvent> {
     let mut seen = Vec::new();
-    loop {
+    let mut ended = 0;
+    while ended < turns {
         let event = h
             .events
             .recv_timeout(Duration::from_secs(300))
             .expect("the turn stalled");
-        eprintln!("{}", serde_json::to_string(&event).unwrap());
+        let line = serde_json::to_string(&event).unwrap();
+        // Streamed text is long and dull; the rest tells the story.
+        if !line.starts_with(r#"{"type":"thought""#) && !line.starts_with(r#"{"type":"agentText""#)
+        {
+            eprintln!("{}", &line[..line.len().min(500)]);
+        }
         match &event {
             DesktopEvent::Ui { message, .. } => {
                 drawn.push(message.clone());
@@ -1444,29 +1462,57 @@ fn real_model_agent86ui() {
                     report.errors
                 );
             }
-            DesktopEvent::UiWaitRequest { qid, surface_ids } => {
-                let action = press(&mut runtime, &surface_ids[0]).expect("a button to press");
-                answered = Some(action.surface_id.clone());
-                h.thread
-                    .answer(
-                        *qid,
-                        Answer::Ui {
-                            action: Some(action),
-                        },
-                    )
-                    .unwrap();
-            }
+            DesktopEvent::UiWaitRequest { qid, surface_ids } => on_wait(runtime, *qid, surface_ids),
+            DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. } => ended += 1,
             _ => {}
         }
-        let end = matches!(
-            event,
-            DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. }
-        );
         seen.push(event);
-        if end {
-            break;
-        }
     }
+    seen
+}
+
+fn render_ui_results(events: &[DesktopEvent]) -> Vec<(bool, String)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            DesktopEvent::ToolResult {
+                name, ok, output, ..
+            } if name == "render_ui" => Some((*ok, output.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The model draws a form and waits; the user fills it and presses its button, which is the
+/// call's result. Pressed again after the turn, it runs a turn of its own. Writes the surfaces to
+/// `/tmp/a86-live-surfaces.json`.
+#[test]
+#[ignore]
+fn real_model_agent86ui() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = live_thread(dir.path(), None, None);
+    let mut runtime = Runtime::basic();
+    let mut drawn = Vec::new();
+    h.thread
+        .prompt(
+            "I'd like to book a table at a restaurant. Show me a form for my name, the party \
+             size, and the date, with a Book button, and wait for my answer before going on. \
+             Then confirm the booking in one sentence, and leave the form on screen.",
+        )
+        .unwrap();
+    let mut answered = None;
+    let seen = live_turns(&h, 1, &mut runtime, &mut drawn, |runtime, qid, surfaces| {
+        let action = live_press(runtime, &surfaces[0]).expect("a button to press");
+        answered = Some(action.surface_id.clone());
+        h.thread
+            .answer(
+                qid,
+                Answer::Ui {
+                    action: Some(action),
+                },
+            )
+            .unwrap();
+    });
     std::fs::write(
         "/tmp/a86-live-surfaces.json",
         serde_json::to_string_pretty(&drawn).unwrap(),
@@ -1475,21 +1521,20 @@ fn real_model_agent86ui() {
     assert!(!drawn.is_empty(), "the model drew nothing");
     let surface = answered.expect("the model waited for an answer");
     assert!(
-        seen.iter().any(|e| matches!(e,
-            DesktopEvent::ToolResult { name, ok: true, output, .. }
-                if name == "render_ui" && output.contains("[ui action]"))),
+        render_ui_results(&seen)
+            .iter()
+            .any(|(ok, output)| *ok && output.contains("[ui action]")),
         "the action came back as the waiting call's result"
     );
     assert!(matches!(seen.last(), Some(DesktopEvent::TurnEnded { .. })));
 
     // After the turn: a press no call waits on runs a turn of its own.
     if runtime.surface_ids().any(|id| id == surface) {
-        let action = press(&mut runtime, &surface).expect("the button again");
+        let action = live_press(&mut runtime, &surface).expect("the button again");
         assert!(!h.thread.ui_action(action).unwrap(), "nothing is running");
-        let events = h.until_end();
-        for event in &events {
-            eprintln!("{}", serde_json::to_string(event).unwrap());
-        }
+        let events = live_turns(&h, 1, &mut runtime, &mut drawn, |_, _, _| {
+            panic!("no wait expected")
+        });
         assert!(matches!(
             events.first(),
             Some(DesktopEvent::UiActionStarted { .. })
@@ -1501,4 +1546,142 @@ fn real_model_agent86ui() {
     } else {
         eprintln!("(the model deleted the surface, so no press after the turn)");
     }
+}
+
+/// The model draws a form and waits; the user dismisses it: the call fails, the turn goes on,
+/// and the surface stays up. Then, during the next turn, the user presses its button: the press
+/// is held, and runs as a turn of its own once that turn ends.
+#[test]
+#[ignore]
+fn real_model_agent86ui_dismiss_and_hold() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = live_thread(dir.path(), None, None);
+    let mut runtime = Runtime::basic();
+    let mut drawn = Vec::new();
+    h.thread
+        .prompt(
+            "Show me a form to sign up for the newsletter: my email, and a Subscribe button. \
+             Wait for my answer before going on. If I don't answer, say so in one sentence and \
+             leave the form on screen.",
+        )
+        .unwrap();
+    let mut dismissed = None;
+    let seen = live_turns(&h, 1, &mut runtime, &mut drawn, |_, qid, surfaces| {
+        eprintln!("  dismiss {surfaces:?}");
+        dismissed = Some(surfaces[0].clone());
+        h.thread.answer(qid, Answer::Ui { action: None }).unwrap();
+    });
+    let surface = dismissed.expect("the model waited for an answer");
+    let results = render_ui_results(&seen);
+    assert!(
+        results.iter().any(|(ok, _)| !ok),
+        "the dismissed call failed: {results:?}"
+    );
+    assert!(
+        matches!(seen.last(), Some(DesktopEvent::TurnEnded { .. })),
+        "the turn went on and ended"
+    );
+    assert!(
+        runtime.surface_ids().any(|id| id == surface),
+        "the dismissed surface stayed up (unless the model deleted it)"
+    );
+
+    // A press during a turn is held until it ends.
+    h.thread
+        .prompt("In two sentences, why do people read newsletters?")
+        .unwrap();
+    let action = live_press(&mut runtime, &surface).expect("the button");
+    assert!(
+        h.thread.ui_action(action).unwrap(),
+        "held: a turn is running"
+    );
+    let events = live_turns(&h, 2, &mut runtime, &mut drawn, |_, _, _| {
+        panic!("no wait expected")
+    });
+    let marks: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            DesktopEvent::TurnEnded { .. } => Some("end"),
+            DesktopEvent::TurnFailed { .. } => Some("failed"),
+            DesktopEvent::UiActionStarted { .. } => Some("action"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marks, ["end", "action", "end"]);
+}
+
+/// A session where the model drew a form and updated it, closed and reopened: the surface comes
+/// back as it was (agent86 rebuilds it from the history), and the reopened agent takes a press on
+/// it. Writes the reopened history and surfaces to `/tmp/a86-live-reopen.json`.
+#[test]
+#[ignore]
+fn real_model_agent86ui_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let memory = agent86_core::sdk::Memory::in_memory().unwrap();
+    let first = live_thread(dir.path(), Some(memory.clone()), None);
+    let mut runtime = Runtime::basic();
+    let mut drawn = Vec::new();
+    first
+        .thread
+        .prompt(
+            "Show me a form to rate this app: a Slider from 1 to 5 bound to /rating (start it at \
+             3), and a Send button whose event's context holds the rating. Don't wait for my \
+             answer. Then, in a second render_ui call, set /rating to 5 with updateDataModel.",
+        )
+        .unwrap();
+    live_turns(&first, 1, &mut runtime, &mut drawn, |_, qid, _| {
+        first
+            .thread
+            .answer(qid, Answer::Ui { action: None })
+            .unwrap();
+    });
+    let surface = runtime
+        .surface_ids()
+        .next()
+        .expect("the model drew a surface")
+        .to_owned();
+    let before = runtime.data_model(&surface).cloned();
+    let id = first.thread.session_id().to_owned();
+    drop(first);
+
+    let again = live_thread(dir.path(), Some(memory), Some(id));
+    let history = again.thread.take_history();
+    let surfaces = again.thread.take_surfaces();
+    std::fs::write(
+        "/tmp/a86-live-reopen.json",
+        serde_json::to_string_pretty(&json!({"history": history, "surfaces": surfaces})).unwrap(),
+    )
+    .unwrap();
+    eprintln!(
+        "reopened: {} history items, {} surfaces",
+        history.len(),
+        surfaces.len()
+    );
+    let rebuilt = surfaces
+        .iter()
+        .find(|s| s["createSurface"]["surfaceId"] == surface.as_str())
+        .expect("the surface came back");
+    assert_eq!(
+        Some(&rebuilt["createSurface"]["dataModel"]),
+        before.as_ref(),
+        "as it was when the thread closed"
+    );
+
+    // The renderer draws the rebuilt surface, and the reopened agent takes a press on it.
+    let mut reopened = Runtime::basic();
+    assert!(reopened.apply(&surfaces).is_ok());
+    let action = live_press(&mut reopened, &surface).expect("the button");
+    assert!(!again.thread.ui_action(action).unwrap());
+    let events = live_turns(&again, 1, &mut reopened, &mut drawn, |_, _, _| {
+        panic!("no wait expected")
+    });
+    assert!(matches!(
+        events.first(),
+        Some(DesktopEvent::UiActionStarted { .. })
+    ));
+    assert!(
+        matches!(events.last(), Some(DesktopEvent::TurnEnded { .. })),
+        "the press was accepted on the rebuilt surface: {:?}",
+        events.last()
+    );
 }
