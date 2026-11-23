@@ -53,6 +53,17 @@ test("a waiting question is always worth a notification in the background", () =
   );
 });
 
+test("the agent's questions, or a surface it waits on, notify too", () => {
+  const context = { tab: "web", background: true, turnSeconds: null };
+  const asks: DesktopEvent = { type: "uiWaitRequest", qid: 3, surfaceIds: ["agent86_ask_1"] };
+  expect(notificationFor(asks, context)).toEqual({
+    title: "Questions from the agent",
+    body: "web: the agent has questions for you.",
+  });
+  const waits: DesktopEvent = { type: "uiWaitRequest", qid: 4, surfaceIds: ["form"] };
+  expect(notificationFor(waits, context)?.title).toBe("Answer needed");
+});
+
 test("only a long turn's end is announced, and not a cancelled one", () => {
   const context = { tab: "web", background: true };
   expect(notificationFor(ended("end_turn"), { ...context, turnSeconds: 5 })).toBeNull();

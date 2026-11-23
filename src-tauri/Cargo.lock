@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "agent86-core"
-version = "1.2.0"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d3f2980bca696595544e4666a8df7af01665b6c18a21760c7c63dfad18baccf"
+checksum = "1a8cd2e34c5c3c704155d0fab1ceb8a332ecc2bfc1fbcfa03205a268a70b2b6e"
 dependencies = [
  "agent86-ui",
  "apple-native-keyring-store",
@@ -84,9 +84,9 @@ dependencies = [
 
 [[package]]
 name = "agent86-ui"
-version = "1.2.0"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86bac9ad876c6b8f6595228560bdd93aac40862686f5428632719e1997980648"
+checksum = "f47885d4862c7824acea02b5632444c076f9cd05f62fa91ee2ec162572d88a0a"
 dependencies = [
  "fancy-regex 0.20.2",
  "jiff 1.0.1",

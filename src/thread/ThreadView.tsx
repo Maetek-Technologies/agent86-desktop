@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ASK_USER } from "../desktop-client/ask.ts";
 import { openSurfaceUrl } from "../desktop-client/backend.ts";
 import { commandsFor } from "../desktop-client/commands.ts";
 import type { Answer, Approval, OpenedThread, UiAction } from "../desktop-client/events.ts";
@@ -14,6 +15,7 @@ import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
 import { SecretsPanel } from "../secrets/SecretsPanel.tsx";
 import { TrustBanner, TrustDialog } from "../trust/TrustDialog.tsx";
 import { PermissionPanel } from "../tools/PermissionPanel.tsx";
+import { AskUserCard } from "./AskUserCard.tsx";
 import { LimitPanel } from "./LimitPanel.tsx";
 import { PromptInput } from "./PromptInput.tsx";
 import { ContextMeter, TurnSummaryLine } from "./Spend.tsx";
@@ -71,6 +73,14 @@ export function ThreadView({
   // agent86 asks one question at a time; the oldest open one is the one it waits on.
   const question = state.questions[0];
   const commands = useMemo(() => commandsFor(thread.capabilities), [thread.capabilities]);
+  // The calls whose surfaces are in the transcript.
+  const drawnFor = useMemo(
+    () =>
+      new Set(
+        state.entries.flatMap((e) => (e.kind === "surface" && e.toolCallId ? [e.toolCallId] : [])),
+      ),
+    [state.entries],
+  );
   const surfaces = useSurfaces({
     threadId: thread.threadId,
     model: thread.model,
@@ -160,7 +170,11 @@ export function ThreadView({
               {state.entries.length === 0 && <Welcome thread={thread} />}
               <SurfaceProvider value={surfaces.context}>
                 {state.entries.map((entry) => (
-                  <EntryView key={entry.id} entry={entry} />
+                  <EntryView
+                    key={entry.id}
+                    entry={entry}
+                    formShown={entry.kind === "tool" && drawnFor.has(entry.toolCallId)}
+                  />
                 ))}
               </SurfaceProvider>
               {state.running && !state.cancelling && !question && last?.kind !== "agent" && (
@@ -282,7 +296,9 @@ function QuestionPanel({
   }
 }
 
-function EntryView({ entry }: { entry: Entry }) {
+/** `formShown`: an `ask_user` call's form is in the transcript (this session drew it; a reopened
+ * one shows only the call). */
+function EntryView({ entry, formShown = false }: { entry: Entry; formShown?: boolean }) {
   switch (entry.kind) {
     case "user": {
       const pressed = UI_ACTION.exec(entry.text);
@@ -329,6 +345,7 @@ function EntryView({ entry }: { entry: Entry }) {
         </div>
       );
     case "tool":
+      if (entry.name === ASK_USER) return <AskUserCard entry={entry} formShown={formShown} />;
       return entry.name === "render_ui" ? (
         <RenderUiNote entry={entry} />
       ) : (

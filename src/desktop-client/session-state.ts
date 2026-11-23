@@ -1,6 +1,7 @@
 // A thread's transcript as plain state, and the pure function that folds Rust's events into it.
 // React renders this; tests assert on it without a DOM. The entry shapes follow agent86-web's
 // acp-client session state so its components can be ported in M3.
+import { ASK_USER, askOutcome, isAskSurface, type AskOutcome } from "./ask.ts";
 import type {
   ApprovalInfo,
   DesktopEvent,
@@ -121,8 +122,9 @@ export interface TurnSummaryEntry {
   cancelled: boolean;
 }
 
-/** Where an agent86UI surface shows in the transcript: at the `render_ui` call that created it.
- * Later messages redraw it in place. */
+/** Where an agent86UI surface shows in the transcript: right after the call that created it (a
+ * `render_ui` call, or an `ask_user` call whose form agent86 built). Later messages redraw it in
+ * place. */
 export interface SurfaceEntry {
   kind: "surface";
   id: number;
@@ -131,6 +133,12 @@ export interface SurfaceEntry {
   toolCallId: string | null;
   /** The agent deleted it (`deleteSurface`). */
   deleted: boolean;
+  /** An `ask_user` form agent86 took down once it was answered or dismissed, kept locked as the
+   * record of what was asked and answered. Its `surfaceId` is then one of its own
+   * (`agent86_ask_<n>~<entry id>`), since a rebuilt agent numbers its forms from 1 again. */
+  kept?: boolean;
+  /** How an `ask_user` form's questions ended, once its call's result came. */
+  outcome?: AskOutcome;
 }
 
 /** One A2UI message, as JSON. */
@@ -159,7 +167,8 @@ export type Question =
       replacing: boolean;
       canRemember: boolean;
     }
-  /** A `render_ui` call waits for the user's first action on one of these surfaces. */
+  /** A `render_ui` call waits for the user's first action on one of these surfaces, or an
+   * `ask_user` call for the Send of its form (an `agent86_ask_` surface). */
   | { kind: "ui"; qid: number; surfaceIds: string[] };
 
 export interface SessionState {
@@ -310,7 +319,7 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         (e) => e.kind === "tool" && e.toolCallId === action.id,
         (e) => e.kind === "tool" && e.status === "running",
       );
-      return {
+      const done: SessionState = {
         ...state,
         entries: state.entries.map((entry, at) =>
           at === target && entry.kind === "tool"
@@ -325,6 +334,9 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
             : entry,
         ),
       };
+      return action.name === ASK_USER
+        ? askEnded(done, action.id, askOutcome(action.ok, action.output))
+        : done;
     }
     case "approvalRequest":
       return {
@@ -643,6 +655,10 @@ function surfaceMessage(
   message: UiMessage,
   toolCallId: string | null,
 ): SessionState {
+  const remove = message.deleteSurface as { surfaceId?: unknown } | undefined;
+  if (remove && typeof remove.surfaceId === "string" && isAskSurface(remove.surfaceId)) {
+    return keepAskForm(state, remove.surfaceId);
+  }
   // The agent changed the surface: whatever the user sent has been seen, so it unlocks.
   const named = namedSurface(message);
   const logged = {
@@ -651,7 +667,6 @@ function surfaceMessage(
     uiSent: named === null ? state.uiSent : state.uiSent.filter((id) => id !== named),
   };
   const create = message.createSurface as { surfaceId?: unknown } | undefined;
-  const remove = message.deleteSurface as { surfaceId?: unknown } | undefined;
   if (create && typeof create.surfaceId === "string") {
     const surfaceId = create.surfaceId;
     const shown = logged.entries.some(
@@ -659,7 +674,13 @@ function surfaceMessage(
     );
     return shown
       ? logged
-      : push(logged, (id) => ({ kind: "surface", id, surfaceId, toolCallId, deleted: false }));
+      : insertAtCall(logged, toolCallId, (id) => ({
+          kind: "surface",
+          id,
+          surfaceId,
+          toolCallId,
+          deleted: false,
+        }));
   }
   if (remove && typeof remove.surfaceId === "string") {
     const surfaceId = remove.surfaceId;
@@ -673,6 +694,95 @@ function surfaceMessage(
     };
   }
   return logged;
+}
+
+/**
+ * Put a new entry right after the card of call `toolCallId` (after any surfaces that call already
+ * placed there), or at the end when no card has that id. agent86 announces a step's whole batch of
+ * calls before it runs them, so the end may be several cards past the call.
+ */
+function insertAtCall(
+  state: SessionState,
+  toolCallId: string | null,
+  make: (id: number) => Entry,
+): SessionState {
+  const call =
+    toolCallId === null
+      ? -1
+      : resultTarget(
+          state.entries,
+          (e) => e.kind === "tool" && e.toolCallId === toolCallId,
+          (e) => e.kind === "tool" && e.status === "running",
+        );
+  if (call < 0) return push(state, make);
+  let at = call + 1;
+  for (; at < state.entries.length; at += 1) {
+    const next = state.entries[at]!;
+    if (next.kind !== "surface" || next.toolCallId !== toolCallId) break;
+  }
+  const entries = [...state.entries.slice(0, at), make(state.nextId), ...state.entries.slice(at)];
+  return { ...state, entries, nextId: state.nextId + 1 };
+}
+
+/**
+ * agent86 took an `ask_user` form down (`deleteSurface`), answered or dismissed. Rather than
+ * removing it, keep it in the transcript, locked, as the record of what was asked and answered, as
+ * the terminal keeps a copy in its scrollback. Its messages move to an id of its own, so a later
+ * form agent86 numbers the same (a reload rebuilds the agent, which counts from 1 again) gets a
+ * place of its own.
+ */
+function keepAskForm(state: SessionState, surfaceId: string): SessionState {
+  const at = state.entries.findIndex(
+    (e) => e.kind === "surface" && e.surfaceId === surfaceId && !e.deleted,
+  );
+  const entry = state.entries[at];
+  const unlocked = {
+    ...state,
+    uiSent: state.uiSent.filter((id) => id !== surfaceId),
+    uiHeld: state.uiHeld.filter((id) => id !== surfaceId),
+  };
+  if (entry?.kind !== "surface") {
+    // Never placed, so there is nothing to keep: it simply goes.
+    return {
+      ...unlocked,
+      uiLog: [...state.uiLog, { version: "1.0", deleteSurface: { surfaceId } }],
+    };
+  }
+  const keptId = `${surfaceId}~${entry.id}`;
+  const entries = state.entries.slice();
+  entries[at] = { ...entry, surfaceId: keptId, kept: true };
+  return {
+    ...unlocked,
+    entries,
+    uiLog: state.uiLog.map((message) => renameSurface(message, surfaceId, keptId)),
+  };
+}
+
+/** `message`, with surface `from` renamed `to` if it names it. */
+function renameSurface(message: UiMessage, from: string, to: string): UiMessage {
+  if (namedSurface(message) !== from) return message;
+  return Object.fromEntries(
+    Object.entries(message).map(([key, body]) =>
+      body && typeof body === "object" && (body as { surfaceId?: unknown }).surfaceId === from
+        ? [key, { ...body, surfaceId: to }]
+        : [key, body],
+    ),
+  );
+}
+
+/** An `ask_user` call's result came: its form says how the questions ended. */
+function askEnded(state: SessionState, toolCallId: string, outcome: AskOutcome): SessionState {
+  const at = state.entries.findLastIndex(
+    (e) =>
+      e.kind === "surface" &&
+      e.toolCallId === toolCallId &&
+      isAskSurface(e.surfaceId) &&
+      e.outcome === undefined,
+  );
+  if (at < 0) return state;
+  const entries = state.entries.slice();
+  entries[at] = { ...(entries[at] as SurfaceEntry), outcome };
+  return { ...state, entries };
 }
 
 /** The surface ids a `render_ui` call's arguments name (`messages` may be a JSON string, as

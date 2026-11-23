@@ -118,9 +118,9 @@ widgets, so nothing the model writes runs as code.
   agent changes the surface (to show a result, say), it unlocks by itself. A button that only
   opens a link does not lock anything.
 - **When the agent waits.** For something it cannot go on without, the agent waits for you: the
-  frame says **The agent is waiting for your answer here**. Press the surface's button to answer,
-  or **Dismiss** to let it carry on without one (the surface stays, and you can still answer later).
-  **Stop** ends the wait too.
+  frame says **The agent is waiting for your answer here** and takes the keyboard. Press the
+  surface's button to answer, or **Dismiss** (or **Esc**) to let it carry on without one (the
+  surface stays, and you can still answer later). **Stop** ends the wait too.
 - **Links.** A surface's button may open a web page. The app shows you the whole address and where
   it goes first, and opens it in your browser only if you agree. Only `http` and `https` links open.
 - **Pictures, video, and sound** show only from files inside the thread's workspace (or embedded in
@@ -130,6 +130,30 @@ widgets, so nothing the model writes runs as code.
   asks for a secret through the app's own secret prompt instead.
 - **Reopening.** When you reopen a session, its surfaces come back where they were, as you last
   left them. What you typed into a field but never sent is not kept.
+
+### Questions from the agent
+
+When the agent needs to know something before it can go on (where you're leaving from, which kind
+of trip you want, a date), it asks with a short form instead of in its reply. agent86 builds the
+form from the agent's questions, so it always works, whatever the model.
+
+- **Where it shows.** Right below the agent's **? Questions** line, in the same dashed, blue-tinted
+  frame as the surfaces above, headed **? Questions from the agent** and the model's name. The
+  questions and their options are the model's words; the app's own approvals and secret prompts
+  never look like this.
+- **Answering.** The form takes the keyboard at once: type in a field, pick an option, Tab to the
+  next question. A question with options also offers **Other**: pick it and say it in your own
+  words in the field below. **Send answers** stays greyed until every question not marked
+  (optional) has an answer.
+- **Not answering.** **Dismiss** (or **Esc**) closes the questions without answering: the agent
+  carries on with what it knows and doesn't ask the same questions again in that turn. **Stop**
+  ends the turn.
+- **Afterwards.** The form stays in the conversation, locked, so you can see what was asked and
+  what you answered; its frame says **Answered**, **Dismissed, nothing was sent**, or **Not
+  answered**. The **? Questions** line above it opens to the same answers as plain text. When you
+  reopen a session the form itself doesn't come back, but that line does, open, with your answers.
+- **In another tab**, the tab shows **waiting for you**, and a notification says the agent has
+  questions (when notifications are on).
 
 ### Sessions
 
@@ -187,8 +211,8 @@ record.
 
 **Settings, Appearance** sets the theme (as the system, light, or dark), notifications, and a tray
 (menu bar) icon that shows how many turns are running. Notifications tell you when a thread in the
-background needs an approval, a limit raise, or a secret, and when a turn of 30 seconds or more
-ends; clicking one shows that thread. The window remembers its size and place. Opening the app
+background needs an approval, a limit raise, a secret, or your answers to the agent's questions or
+a surface it waits on, and when a turn of 30 seconds or more ends; clicking one shows that thread. The window remembers its size and place. Opening the app
 again while it runs brings the open window forward.
 
 The sessions panel on the left hides and shows with the **‹ ›** button at the left end of the tabs

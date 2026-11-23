@@ -30,7 +30,7 @@ use ts_rs::TS;
 
 /// The agent86-core version this build embeds. It matches the exact pin in Cargo.toml; the test
 /// below fails if the two drift apart.
-pub const AGENT86_CORE_VERSION: &str = "1.2.0";
+pub const AGENT86_CORE_VERSION: &str = "1.2.2";
 
 #[derive(Debug, Serialize, PartialEq, Eq, TS)]
 #[ts(export)]
@@ -739,7 +739,7 @@ pub fn answer(
     threads.answer(&thread_id, qid, answer)
 }
 
-/// A button pressed on an agent86UI surface that no `render_ui` call waits on: it becomes the
+/// A button pressed on an agent86UI surface that no call waits on: it becomes the
 /// next user message and runs a turn, now or, while one runs, when it ends. Returns whether it
 /// was held. (An action a waiting call asked for is an `answer` instead.)
 #[tauri::command]

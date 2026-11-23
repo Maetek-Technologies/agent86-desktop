@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useReducer } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Answer, DesktopEvent, UiAction } from "../../desktop-client/events.ts";
+import { TRIP_FORM } from "../../desktop-client/ask.fixture.ts";
 import { initialState, reduce, type SessionState } from "../../desktop-client/session-state.ts";
 import { LinkConfirm } from "./SurfaceFrame.tsx";
 import { SurfaceEntryView, SurfaceProvider, useSurfaces } from "./Surfaces.tsx";
@@ -271,5 +272,120 @@ describe("agent86UI surfaces", () => {
     expect((screen.getByRole("button", { name: "Docs" }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+});
+
+// The form agent86-core 1.2.2 builds for the model's `ask_user` questions, exactly as it arrives.
+describe("the agent's questions (ask_user)", () => {
+  const drawn: DesktopEvent = { type: "ui", toolCallId: "c1", message: TRIP_FORM };
+  const wait: DesktopEvent = { type: "uiWaitRequest", qid: 5, surfaceIds: ["agent86_ask_1"] };
+
+  it("reads as the agent's questions, takes the focus, and sends the answers from Send", () => {
+    const onAnswer = vi.fn();
+    const { container } = render(<Harness events={[drawn, wait]} onAnswer={onAnswer} />);
+    const frame = screen.getByRole("region", { name: "Questions from the agent" });
+    expect(frame.textContent).toContain("Questions from the agent · vllm:qwen");
+    expect(frame.textContent).toContain("The agent is waiting for your answers");
+    expect(frame.textContent).not.toContain("agent86_ask_1");
+    expect(frame.textContent).toContain("Your weekend trip");
+    // Still the agent's frame, never the style of the app's own approvals.
+    expect(container.innerHTML).not.toMatch(/warn/);
+
+    const from = screen.getByLabelText<HTMLInputElement>("Where are you leaving from?");
+    expect(document.activeElement).toBe(from);
+    const send = screen.getByRole("button", { name: "Send answers" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+
+    fireEvent.change(from, { target: { value: "Boston" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Other" }));
+    fireEvent.change(screen.getByLabelText("Other, in your own words"), {
+      target: { value: "A food tour" },
+    });
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(onAnswer).toHaveBeenCalledWith(5, {
+      type: "ui",
+      action: expect.objectContaining({
+        name: "answers",
+        surfaceId: "agent86_ask_1",
+        sourceComponentId: "send",
+        context: {
+          answers: { from: "Boston", style: ["__other__"], nights: "" },
+          other: { style: "A food tour" },
+        },
+      }),
+    });
+    // Locked once sent, with no offer to send again: agent86 takes the form down next.
+    expect(from.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Change and send again" })).toBeNull();
+  });
+
+  it("dismisses the questions with Escape or Dismiss", () => {
+    const onAnswer = vi.fn();
+    render(<Harness events={[drawn, wait]} onAnswer={onAnswer} />);
+    fireEvent.keyDown(screen.getByLabelText("Where are you leaving from?"), { key: "Escape" });
+    expect(onAnswer).toHaveBeenLastCalledWith(5, { type: "ui", action: null });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onAnswer).toHaveBeenCalledTimes(2);
+    expect(onAnswer).toHaveBeenLastCalledWith(5, { type: "ui", action: null });
+  });
+
+  it("takes no input when no call waits on it", () => {
+    render(<Harness events={[drawn]} />);
+    expect(screen.getByLabelText<HTMLInputElement>("Where are you leaving from?").disabled).toBe(
+      true,
+    );
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
+  it("stays, locked, as the record of what was asked and answered", () => {
+    const answered: DesktopEvent[] = [
+      drawn,
+      wait,
+      { type: "questionClosed", qid: 5, answered: true },
+      {
+        type: "ui",
+        toolCallId: "c1",
+        message: { version: "1.0", deleteSurface: { surfaceId: "agent86_ask_1" } },
+      },
+      {
+        type: "toolResult",
+        id: "c1",
+        name: "ask_user",
+        ok: true,
+        output: 'The user answered:\n{"from": "Boston", "style": "Outdoors", "nights": null}',
+        truncated: false,
+        error: null,
+        summary: "",
+      },
+    ];
+    render(<Harness events={answered} />);
+    const frame = screen.getByRole("region", { name: "Questions from the agent" });
+    expect(frame.textContent).toContain("Answered");
+    expect(frame.textContent).not.toContain("waiting");
+    expect(screen.queryByText(/The agent removed the surface/)).toBeNull();
+    expect(screen.getByLabelText<HTMLInputElement>("Where are you leaving from?").disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Send answers" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+});
+
+describe("a surface a render_ui call waits on", () => {
+  it("takes the focus too, and Escape dismisses it", () => {
+    const onAnswer = vi.fn();
+    render(
+      <Harness
+        events={[nameForm, { type: "uiWaitRequest", qid: 8, surfaceIds: ["form"] }]}
+        onAnswer={onAnswer}
+      />,
+    );
+    const name = screen.getByLabelText("Name");
+    expect(document.activeElement).toBe(name);
+    fireEvent.keyDown(name, { key: "Escape" });
+    expect(onAnswer).toHaveBeenCalledWith(8, { type: "ui", action: null });
   });
 });
