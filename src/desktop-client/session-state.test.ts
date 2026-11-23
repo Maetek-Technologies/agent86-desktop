@@ -162,4 +162,29 @@ describe("session state", () => {
       { kind: "notice", id: 1, text: "Not sent, because the turn was stopped: submit on form." },
     ]);
   });
+
+  it("gives a result to one card when a provider reuses call ids (Ollama)", () => {
+    const call = (title: string): DesktopEvent => ({
+      type: "toolCall",
+      id: "ollama-0",
+      name: "list_dir",
+      arguments: {},
+      title,
+    });
+    const result = (output: string): DesktopEvent => ({
+      type: "toolResult",
+      id: "ollama-0",
+      name: "list_dir",
+      ok: true,
+      output,
+      truncated: false,
+      error: null,
+      summary: output,
+    });
+    const state = fold(call("first"), result("one"), call("second"), result("two"));
+    expect(state.entries.flatMap((e) => (e.kind === "tool" ? [[e.title, e.output]] : []))).toEqual([
+      ["first", "one"],
+      ["second", "two"],
+    ]);
+  });
 });

@@ -288,11 +288,18 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
         arguments: action.arguments,
         status: "running",
       }));
-    case "toolResult":
+    case "toolResult": {
+      // Some providers (Ollama) reuse call ids from step to step, so only one card takes this
+      // result: the oldest still running with the id.
+      const target = resultTarget(
+        state.entries,
+        (e) => e.kind === "tool" && e.toolCallId === action.id,
+        (e) => e.kind === "tool" && e.status === "running",
+      );
       return {
         ...state,
-        entries: state.entries.map((entry) =>
-          entry.kind === "tool" && entry.toolCallId === action.id
+        entries: state.entries.map((entry, at) =>
+          at === target && entry.kind === "tool"
             ? {
                 ...entry,
                 status: action.ok ? "completed" : "failed",
@@ -304,6 +311,7 @@ export function reduce(state: SessionState, action: DesktopEvent | LocalAction):
             : entry,
         ),
       };
+    }
     case "approvalRequest":
       return {
         ...markAwaiting(state, action.tool, action.qid),
@@ -522,11 +530,16 @@ function applySubagent(
           { id: update.id, name: update.name, arguments: update.arguments, status: "running" },
         ],
       };
-    case "toolResult":
+    case "toolResult": {
+      const target = resultTarget(
+        base.calls,
+        (c) => c.id === update.id,
+        (c) => c.status === "running",
+      );
       return {
         ...base,
-        calls: base.calls.map((c) =>
-          c.id === update.id
+        calls: base.calls.map((c, at) =>
+          at === target
             ? {
                 ...c,
                 status: update.ok ? "completed" : "failed",
@@ -537,6 +550,7 @@ function applySubagent(
             : c,
         ),
       };
+    }
     case "notice":
       return { ...base, notices: [...base.notices, update.text.trim()] };
     case "finished": {
@@ -570,6 +584,17 @@ function closeQuestion(state: SessionState, qid: number): SessionState {
         : entry,
     ),
   };
+}
+
+/** Which of `items` a tool result belongs to: the oldest match still running, else the latest
+ * match (a replayed or repeated result), else none (-1). */
+function resultTarget<T>(
+  items: T[],
+  matches: (item: T) => boolean,
+  running: (item: T) => boolean,
+): number {
+  const open = items.findIndex((item) => matches(item) && running(item));
+  return open >= 0 ? open : items.findLastIndex(matches);
 }
 
 /** One fewer held press on the action's surface. */
