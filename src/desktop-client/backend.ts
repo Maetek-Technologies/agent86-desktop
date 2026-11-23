@@ -1,7 +1,7 @@
 // The UI's only door to the Rust side. Components call these functions, never `invoke` directly,
 // so the IPC contract lives in one place: here, src-tauri/src/commands.rs, and the types ts-rs
 // generates from it.
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   ActivityView,
@@ -27,6 +27,7 @@ import type {
   Settings,
   SettingsState,
   TurnRequest,
+  UiAction,
   UpdateInfo,
   UpdateProgress,
 } from "./events.ts";
@@ -138,6 +139,24 @@ export function cancelTurn(threadId: string): Promise<void> {
 /** Answer question `qid` (an approval, a limit raise, a secret) of the thread's running turn. */
 export function answer(threadId: string, qid: number, answer: Answer): Promise<void> {
   return invoke("answer", { threadId, qid, answer });
+}
+
+/** A button pressed on a surface no call waits on. Resolves to whether it was held for the
+ * running turn to end. */
+export function uiAction(threadId: string, action: UiAction): Promise<boolean> {
+  return invoke("ui_action", { threadId, action });
+}
+
+/** Open a link a surface's `openUrl` asked for, once the user agreed. Rust opens only http and
+ * https. */
+export function openSurfaceUrl(url: string): Promise<void> {
+  return invoke("open_surface_url", { url });
+}
+
+/** The URL a surface's workspace media loads from: the app's `agent86-media` scheme, which Rust
+ * resolves against this thread's workspace (src-tauri/src/surface_media.rs). */
+export function surfaceMediaUrl(threadId: string, path: string): string {
+  return convertFileSrc(`${threadId}/${path}`, "agent86-media");
 }
 
 export function closeThread(threadId: string): Promise<void> {

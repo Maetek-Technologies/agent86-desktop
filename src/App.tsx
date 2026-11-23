@@ -18,6 +18,7 @@ import {
   renameSession,
   setThreadApproval,
   setThreadModel,
+  uiAction,
   type AppInfo,
   type ModelInfo,
   type SessionList,
@@ -30,6 +31,7 @@ import type {
   Approval,
   DesktopEvent,
   SessionSummary,
+  UiAction,
   UpdateInfo,
 } from "./desktop-client/events.ts";
 import type { LocalAction } from "./desktop-client/session-state.ts";
@@ -642,6 +644,16 @@ function TabView({
     [opened, local],
   );
 
+  const pressSurface = useCallback(
+    (action: UiAction) => {
+      uiAction(opened.threadId, action).then(
+        (held) => held && local({ type: "local/uiHeld", surfaceId: action.surfaceId }),
+        (e: unknown) => local({ type: "local/warning", text: String(e) }),
+      );
+    },
+    [opened, local],
+  );
+
   const searchFiles = useCallback((query: string) => findFiles(opened.threadId, query), [opened]);
 
   return (
@@ -651,6 +663,8 @@ function TabView({
       onSend={send}
       onStop={stop}
       onAnswer={reply}
+      onUiAction={pressSurface}
+      onLocal={local}
       findFiles={searchFiles}
       secretsOpen={secretsOpen}
       onSecrets={setSecretsOpen}

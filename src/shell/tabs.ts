@@ -57,9 +57,13 @@ export function tabsReduce(state: TabsState, action: TabsAction): TabsState {
         ...tab,
         opened: action.opened,
         workspace: action.opened.workspace,
-        session: action.opened.history.length
-          ? reduce(tab.session, { type: "local/history", items: action.opened.history })
-          : tab.session,
+        session: reduce(
+          action.opened.history.length
+            ? reduce(tab.session, { type: "local/history", items: action.opened.history })
+            : tab.session,
+          // agent86UI: the surfaces the session left up, where its calls drew them.
+          { type: "local/surfaces", messages: action.opened.surfaces },
+        ),
       }));
     case "failed":
     case "close": {

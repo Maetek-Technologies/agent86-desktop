@@ -142,4 +142,24 @@ describe("session state", () => {
   it("ignores cancelling when no turn runs", () => {
     expect(fold({ type: "local/cancelling" }).cancelling).toBe(false);
   });
+
+  it("runs a surface action as the user's next message, and notes a dropped one", () => {
+    const action = {
+      name: "submit",
+      surfaceId: "form",
+      sourceComponentId: "ok",
+      timestamp: "2026-11-22T10:00:00Z",
+      context: { name: "Ada" },
+    };
+    const started = fold({ type: "uiActionStarted", action });
+    expect(started.running).toBe(true);
+    expect(started.entries).toEqual([
+      { kind: "user", id: 1, text: '[ui action] submit on form: {"name":"Ada"}' },
+    ]);
+    const dropped = fold({ type: "uiActionDropped", action });
+    expect(dropped.running).toBe(false);
+    expect(dropped.entries).toEqual([
+      { kind: "notice", id: 1, text: "Not sent, because the turn was stopped: submit on form." },
+    ]);
+  });
 });

@@ -55,6 +55,7 @@ function opened(threadId: string, workspace: string, sessionId: string, history:
     ownApproval: false,
     sessionId,
     history,
+    surfaces: [],
     memoryNote: null,
     project: null,
     notes: [] as string[],

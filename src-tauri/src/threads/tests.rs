@@ -2,7 +2,7 @@
 
 use super::actor::{ThreadHandle, ThreadOptions};
 use super::events::{DesktopEvent, StopReason, SubagentUpdate};
-use super::questions::{Answer, ApprovalChoice};
+use super::questions::{Answer, ApprovalChoice, UiAction};
 use agent86_core::sdk::providers::{
     Completion, CompletionDelta, CompletionRequest, DeltaStream, Provider, ProviderError,
 };
@@ -17,6 +17,8 @@ use std::time::Duration;
 enum Reply {
     Text(&'static str),
     Tool(&'static str, Value),
+    /// Several calls in one step: `(id, name, arguments)`.
+    Calls(Vec<(&'static str, &'static str, Value)>),
     /// A stream that never yields, until the turn is cancelled.
     Hang,
 }
@@ -67,6 +69,21 @@ impl Provider for Scripted {
                 })),
             ])
             .boxed(),
+            Reply::Calls(calls) => {
+                let tool_calls = calls
+                    .into_iter()
+                    .map(|(id, name, arguments)| ToolCall {
+                        id: id.into(),
+                        name: name.into(),
+                        arguments: arguments.as_object().cloned().unwrap(),
+                    })
+                    .collect();
+                futures_util::stream::iter([Ok(done(Completion {
+                    tool_calls,
+                    ..Completion::default()
+                }))])
+                .boxed()
+            }
             Reply::Tool(name, arguments) => {
                 let arguments: Map<String, Value> = arguments.as_object().cloned().unwrap();
                 futures_util::stream::iter([Ok(done(Completion {
@@ -105,6 +122,36 @@ fn start_with(
     builtins: Builtins,
     configure: fn(AgentBuilder) -> AgentBuilder,
 ) -> Result<Harness, String> {
+    spawn(
+        replies,
+        workspace,
+        builtins,
+        configure,
+        ThreadOptions::default(),
+    )
+}
+
+/// A thread whose agent may draw with agent86UI.
+fn start_ui(replies: Vec<Reply>, workspace: &Path) -> Result<Harness, String> {
+    spawn(
+        replies,
+        workspace,
+        Builtins::Files,
+        |builder| builder,
+        ThreadOptions {
+            agent86ui: true,
+            ..ThreadOptions::default()
+        },
+    )
+}
+
+fn spawn(
+    replies: Vec<Reply>,
+    workspace: &Path,
+    builtins: Builtins,
+    configure: fn(AgentBuilder) -> AgentBuilder,
+    options: ThreadOptions,
+) -> Result<Harness, String> {
     let provider: Arc<dyn Provider> = Scripted::new(replies);
     let workspace = workspace.to_owned();
     let (tx, events) = mpsc::channel();
@@ -122,7 +169,7 @@ fn start_with(
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
-        ThreadOptions::default(),
+        options,
     )?;
     Ok(Harness { thread, events })
 }
@@ -158,7 +205,8 @@ impl Harness {
             match &event {
                 DesktopEvent::ApprovalRequest { qid, .. }
                 | DesktopEvent::LimitRequest { qid, .. }
-                | DesktopEvent::SecretRequest { qid, .. } => return (*qid, event),
+                | DesktopEvent::SecretRequest { qid, .. }
+                | DesktopEvent::UiWaitRequest { qid, .. } => return (*qid, event),
                 DesktopEvent::TurnEnded { .. } | DesktopEvent::TurnFailed { .. } => {
                     panic!("the turn ended without a question: {seen:#?} then {event:?}")
                 }
@@ -627,6 +675,16 @@ fn memory_thread(
     memory: agent86_core::sdk::Memory,
     resume: Option<String>,
 ) -> Harness {
+    memory_thread_with(replies, workspace, memory, resume, ThreadOptions::default())
+}
+
+fn memory_thread_with(
+    replies: Vec<Reply>,
+    workspace: &Path,
+    memory: agent86_core::sdk::Memory,
+    resume: Option<String>,
+    options: ThreadOptions,
+) -> Harness {
     let provider: Arc<dyn Provider> = Scripted::new(replies);
     let workspace = workspace.to_owned();
     let (tx, events) = mpsc::channel();
@@ -646,7 +704,7 @@ fn memory_thread(
         Arc::new(move |event| {
             let _ = tx.lock().unwrap().send(event);
         }),
-        ThreadOptions::default(),
+        options,
     )
     .unwrap();
     Harness { thread, events }
@@ -874,4 +932,387 @@ fn a_delegated_sub_agent_reports_on_its_calls_card() {
         ),
         "{updates:?}"
     );
+}
+
+// agent86UI (ADR 0005): surfaces the model draws reach the UI, each tied to its call.
+
+/// A `render_ui` call's arguments: a form asking for a name, as agent86's own tests draw it.
+fn name_form() -> Value {
+    json!({"messages": [{"version": "1.0", "createSurface": {
+        "surfaceId": "form",
+        "catalogId": agent86_core::sdk::agent86_ui::BASIC_CATALOG_ID,
+        "components": [
+            {"id": "root", "component": "Column", "children": ["name", "ok"]},
+            {"id": "name", "component": "TextField", "label": "Name", "value": {"@path": "/name"}},
+            {"id": "ok", "component": "Button", "child": "ok_label",
+             "action": {"event": {"name": "submit", "context": {"name": {"@path": "/name"}}}}},
+            {"id": "ok_label", "component": "Text", "text": "OK"}
+        ],
+        "dataModel": {"name": ""}
+    }}]})
+}
+
+#[test]
+fn render_ui_is_offered_only_when_the_thread_draws() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = start(vec![], dir.path(), Builtins::ReadOnly).unwrap();
+    assert!(!plain
+        .thread
+        .capabilities()
+        .tools
+        .contains(&"render_ui".to_owned()));
+    let drawing = start_ui(vec![], dir.path()).unwrap();
+    assert!(drawing
+        .thread
+        .capabilities()
+        .tools
+        .contains(&"render_ui".to_owned()));
+}
+
+#[test]
+fn a_drawn_surface_reaches_the_ui_tied_to_its_call_even_in_a_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    // Two calls in one step: agent86 announces both, then observes them in order, so the
+    // surface's message comes after the first call's result and belongs to the second call.
+    let h = start_ui(
+        vec![
+            Reply::Calls(vec![
+                ("c1", "list_dir", json!({"path": "."})),
+                ("c2", "render_ui", name_form()),
+            ]),
+            Reply::Text("I put up a form."),
+        ],
+        dir.path(),
+    )
+    .unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    let events = h.until_end();
+
+    let order: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            DesktopEvent::ToolCall { id, .. } => Some(format!("call {id}")),
+            DesktopEvent::ToolResult { id, ok, .. } => Some(format!("result {id} {ok}")),
+            DesktopEvent::Ui { tool_call_id, .. } => {
+                Some(format!("ui {}", tool_call_id.as_deref().unwrap_or("-")))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "call c1",
+            "call c2",
+            "result c1 true",
+            "ui c2",
+            "result c2 true"
+        ]
+    );
+    let message = events
+        .iter()
+        .find_map(|event| match event {
+            DesktopEvent::Ui { message, .. } => Some(message),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(message["version"], "1.0");
+    assert_eq!(message["createSurface"]["surfaceId"], "form");
+    assert_eq!(message["createSurface"]["components"][0]["id"], "root");
+    assert_eq!(message["createSurface"]["dataModel"]["name"], "");
+    assert_eq!(agent_text(&events), "I put up a form.");
+}
+
+#[test]
+fn an_invalid_batch_draws_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let broken = json!({"messages": [{"version": "1.0", "createSurface": {
+        "surfaceId": "form",
+        "catalogId": agent86_core::sdk::agent86_ui::BASIC_CATALOG_ID,
+        "components": [{"id": "root", "component": "Txt", "text": "hi"}]
+    }}]});
+    let h = start_ui(
+        vec![Reply::Tool("render_ui", broken), Reply::Text("Sorry.")],
+        dir.path(),
+    )
+    .unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    let events = h.until_end();
+    assert!(!events.iter().any(|e| matches!(e, DesktopEvent::Ui { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, DesktopEvent::ToolResult { ok: false, .. })));
+}
+
+/// [`name_form`], with the call waiting for the user's answer.
+fn waiting_name_form() -> Value {
+    let mut form = name_form();
+    form["wait"] = json!(true);
+    form
+}
+
+fn submit(surface: &str, name: &str) -> UiAction {
+    UiAction {
+        name: "submit".into(),
+        surface_id: surface.into(),
+        source_component_id: "ok".into(),
+        timestamp: "2026-11-22T10:00:00Z".into(),
+        context: json!({ "name": name }).as_object().cloned().unwrap(),
+        user_message: None,
+    }
+}
+
+fn tool_output(events: &[DesktopEvent], call: &str) -> (bool, String) {
+    events
+        .iter()
+        .find_map(|event| match event {
+            DesktopEvent::ToolResult { id, ok, output, .. } if id == call => {
+                Some((*ok, output.clone()))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no result for {call}: {events:#?}"))
+}
+
+#[test]
+fn a_waiting_surface_is_asked_after_it_is_drawn_and_the_action_is_the_calls_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start_ui(
+        vec![
+            Reply::Tool("render_ui", waiting_name_form()),
+            Reply::Text("Hello, Ada."),
+        ],
+        dir.path(),
+    )
+    .unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    let (qid, question) = h.until_question();
+    assert!(matches!(
+        &question,
+        DesktopEvent::UiWaitRequest { surface_ids, .. } if surface_ids == &["form"]
+    ));
+    // Another surface's button is refused; the question stays open for the right one.
+    assert!(h
+        .thread
+        .answer(
+            qid,
+            Answer::Ui {
+                action: Some(submit("elsewhere", "Eve"))
+            }
+        )
+        .is_err());
+    h.thread
+        .answer(
+            qid,
+            Answer::Ui {
+                action: Some(submit("form", "Ada")),
+            },
+        )
+        .unwrap();
+    let events = h.until_end();
+    let (ok, output) = tool_output(&events, "call-1");
+    assert!(ok, "{output}");
+    assert!(output.contains("Rendered surface form."), "{output}");
+    assert!(
+        output.contains(r#"[ui action] submit on form: {"name": "Ada"}"#),
+        "{output}"
+    );
+    assert_eq!(agent_text(&events), "Hello, Ada.");
+}
+
+#[test]
+fn a_dismissed_surface_fails_the_call_but_the_turn_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start_ui(
+        vec![
+            Reply::Tool("render_ui", waiting_name_form()),
+            Reply::Text("No problem."),
+        ],
+        dir.path(),
+    )
+    .unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    let (qid, _) = h.until_question();
+    h.thread.answer(qid, Answer::Ui { action: None }).unwrap();
+    let events = h.until_end();
+    let (ok, _) = tool_output(&events, "call-1");
+    assert!(!ok);
+    assert_eq!(agent_text(&events), "No problem.");
+}
+
+#[test]
+fn cancel_while_a_surface_waits_closes_the_question_and_ends_the_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start_ui(
+        vec![Reply::Tool("render_ui", waiting_name_form())],
+        dir.path(),
+    )
+    .unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    let (qid, _) = h.until_question();
+    h.thread.cancel();
+    let events = h.until_end();
+    assert!(events.contains(&DesktopEvent::QuestionClosed {
+        qid,
+        answered: false
+    }));
+    assert!(matches!(
+        events.last(),
+        Some(DesktopEvent::TurnEnded {
+            stop_reason: StopReason::Cancelled,
+            ..
+        })
+    ));
+}
+
+/// Events up to and including the `n`th turn end from now.
+fn until_ends(h: &Harness, n: usize) -> Vec<DesktopEvent> {
+    (0..n).flat_map(|_| h.until_end()).collect()
+}
+
+/// A thread whose first turn put up [`name_form`], then answers with `replies`.
+fn with_form_up(dir: &Path, replies: Vec<Reply>) -> Harness {
+    let mut script = vec![
+        Reply::Tool("render_ui", name_form()),
+        Reply::Text("The form is up."),
+    ];
+    script.extend(replies);
+    let h = start_ui(script, dir).unwrap();
+    h.thread.prompt("ask me my name").unwrap();
+    h.until_end();
+    h
+}
+
+#[test]
+fn a_button_pressed_after_the_turn_runs_a_turn_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = with_form_up(dir.path(), vec![Reply::Text("Hello, Ada.")]);
+    let held = h.thread.ui_action(submit("form", "Ada")).unwrap();
+    assert!(!held);
+    let events = h.until_end();
+    assert_eq!(
+        events.first(),
+        Some(&DesktopEvent::UiActionStarted {
+            action: submit("form", "Ada")
+        })
+    );
+    assert!(matches!(
+        events.last(),
+        Some(DesktopEvent::TurnEnded { answer, stop_reason: StopReason::EndTurn, .. })
+            if answer == "Hello, Ada."
+    ));
+    assert!(!h.thread.is_busy());
+}
+
+#[test]
+fn a_button_for_a_surface_that_is_not_up_fails_the_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = with_form_up(dir.path(), vec![]);
+    h.thread.ui_action(submit("gone", "Ada")).unwrap();
+    let events = h.until_end();
+    match events.last() {
+        Some(DesktopEvent::TurnFailed { error }) => {
+            assert!(error.contains("gone"), "{error}")
+        }
+        other => panic!("expected the turn to fail, got {other:?}"),
+    }
+    assert!(!h.thread.is_busy());
+}
+
+#[test]
+fn a_button_pressed_during_a_turn_is_held_and_runs_when_it_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = with_form_up(
+        dir.path(),
+        vec![
+            write("a.txt", "x"),
+            Reply::Text("Written."),
+            Reply::Text("Hello, Ada."),
+        ],
+    );
+    h.thread.prompt("write a.txt").unwrap();
+    // The turn waits on its approval, so it is still running when the button is pressed.
+    let (qid, _) = h.until_question();
+    assert!(h.thread.ui_action(submit("form", "Ada")).unwrap());
+    assert!(h.thread.prompt("something else").is_err());
+    h.approve(qid, ApprovalChoice::AllowOnce);
+
+    let events = until_ends(&h, 2);
+    let marks: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            DesktopEvent::UiActionStarted { action } => Some(format!("action {}", action.name)),
+            DesktopEvent::TurnEnded { answer, .. } => Some(format!("end {answer}")),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marks, ["end Written.", "action submit", "end Hello, Ada."]);
+    assert!(!h.thread.is_busy());
+}
+
+#[test]
+fn stopping_the_turn_drops_the_held_buttons() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = with_form_up(dir.path(), vec![write("a.txt", "x")]);
+    h.thread.prompt("write a.txt").unwrap();
+    let (_, _) = h.until_question();
+    assert!(h.thread.ui_action(submit("form", "Ada")).unwrap());
+    h.thread.cancel();
+    let events = h.until_end();
+    assert!(matches!(
+        events.last(),
+        Some(DesktopEvent::TurnEnded {
+            stop_reason: StopReason::Cancelled,
+            ..
+        })
+    ));
+    let dropped = h.events.recv_timeout(TURN_TIMEOUT).unwrap();
+    assert_eq!(
+        dropped,
+        DesktopEvent::UiActionDropped {
+            action: submit("form", "Ada")
+        }
+    );
+    assert!(!h.thread.is_busy());
+    assert!(
+        h.events.recv_timeout(Duration::from_millis(300)).is_err(),
+        "no turn runs after the stop"
+    );
+}
+
+#[test]
+fn a_reopened_session_brings_back_its_surfaces_as_they_were() {
+    let dir = tempfile::tempdir().unwrap();
+    let memory = agent86_core::sdk::Memory::in_memory().unwrap();
+    let drawing = || ThreadOptions {
+        agent86ui: true,
+        ..ThreadOptions::default()
+    };
+    let update = json!({"messages": [{"version": "1.0", "updateDataModel": {
+        "surfaceId": "form", "path": "/name", "value": "Ada"
+    }}]});
+    let first = memory_thread_with(
+        vec![
+            Reply::Tool("render_ui", name_form()),
+            Reply::Tool("render_ui", update),
+            Reply::Text("The form is up."),
+        ],
+        dir.path(),
+        memory.clone(),
+        None,
+        drawing(),
+    );
+    assert!(first.thread.take_surfaces().is_empty());
+    first.thread.prompt("ask me my name").unwrap();
+    first.until_end();
+    let id = first.thread.session_id().to_owned();
+    drop(first);
+
+    let again = memory_thread_with(vec![], dir.path(), memory, Some(id), drawing());
+    let surfaces = again.thread.take_surfaces();
+    assert_eq!(surfaces.len(), 1, "{surfaces:#?}");
+    let create = &surfaces[0]["createSurface"];
+    assert_eq!(create["surfaceId"], "form");
+    assert_eq!(create["dataModel"]["name"], "Ada", "drawn as it was last");
+    assert!(again.thread.take_surfaces().is_empty(), "taken once");
 }

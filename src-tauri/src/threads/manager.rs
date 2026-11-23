@@ -3,7 +3,7 @@
 use super::actor::{Capabilities, EventSink, MakeBuilder, ThreadHandle, ThreadOptions};
 use super::events::{DesktopEvent, SubagentUpdate};
 use super::history::HistoryItem;
-use super::questions::Answer;
+use super::questions::{Answer, UiAction};
 use crate::workspace_files;
 use agent86_core::sdk::Turn;
 use serde::Deserialize;
@@ -27,6 +27,8 @@ pub struct Opened {
     pub capabilities: Capabilities,
     pub session_id: String,
     pub history: Vec<HistoryItem>,
+    /// The surfaces its history rebuilt, each as one A2UI `createSurface` message.
+    pub surfaces: Vec<serde_json::Value>,
     /// Secrets remembered for the project that the thread loaded.
     pub loaded_secrets: Vec<String>,
 }
@@ -113,6 +115,7 @@ impl ThreadManager {
         let loaded_secrets = handle.loaded_secrets().to_vec();
         let session_id = handle.session_id().to_owned();
         let history = handle.take_history();
+        let surfaces = handle.take_surfaces();
         let id = format!("t{}", self.next_id.fetch_add(1, Ordering::SeqCst) + 1);
         self.lock().insert(
             id.clone(),
@@ -129,6 +132,7 @@ impl ThreadManager {
             capabilities,
             session_id,
             history,
+            surfaces,
             loaded_secrets,
         })
     }
@@ -169,6 +173,12 @@ impl ThreadManager {
 
     pub fn answer(&self, id: &str, qid: u64, answer: Answer) -> Result<(), String> {
         self.with(id, |thread| thread.handle.answer(qid, answer))
+    }
+
+    /// A button pressed on one of thread `id`'s surfaces when no call waits on it. Returns
+    /// whether it was held for the running turn to end.
+    pub fn ui_action(&self, id: &str, action: UiAction) -> Result<bool, String> {
+        self.with(id, |thread| thread.handle.ui_action(action))
     }
 
     /// The thread's workspace files matching `query`, for the `@` menu.

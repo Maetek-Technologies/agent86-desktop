@@ -2,10 +2,11 @@
 //! [`TurnEvent`]s, plus the turn's end. `cargo test` writes their TypeScript types to
 //! `src/desktop-client/generated` (ts-rs).
 
-use super::questions::{ApprovalInfo, LimitInfo};
+use super::questions::{ApprovalInfo, LimitInfo, UiAction};
 use agent86_core::sdk::{TurnEvent, TurnSummary, Usage};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::VecDeque;
 use ts_rs::TS;
 
 /// The most tool output sent to the UI for one call. The model's own copy is not affected.
@@ -46,6 +47,17 @@ pub enum DesktopEvent {
         /// agent86's `[tool] name -> summary` line, without the prefix.
         summary: String,
     },
+    /// One A2UI message a `render_ui` call drew (agent86UI): validated against the basic
+    /// catalog and redacted by agent86 before it got here. `message` is the A2UI 1.0
+    /// agent-to-renderer message as JSON (`createSurface`, `updateComponents`,
+    /// `updateDataModel`, or `deleteSurface`). It arrives after its call's `toolCall` and before
+    /// its `toolResult`; `toolCallId` is that call (`None` only if agent86 sent a message
+    /// outside any call, which it does not do today).
+    Ui {
+        tool_call_id: Option<String>,
+        #[ts(type = "Record<string, unknown>")]
+        message: Value,
+    },
     /// A model call finished: what it used, and the session's total so far.
     Usage { step: UsageInfo, session: UsageInfo },
     /// The history was compacted (`summary` is `None` when it was trimmed instead).
@@ -77,6 +89,14 @@ pub enum DesktopEvent {
         /// Whether the answer may also keep it for the project (an OS keyring is attached).
         can_remember: bool,
     },
+    /// A `render_ui` call drew `surfaceIds` (their `ui` events came first) and the turn waits
+    /// for the user's first action on one of them. Answer with `answer`: the action, or a
+    /// dismissal.
+    UiWaitRequest {
+        #[ts(type = "number")]
+        qid: u64,
+        surface_ids: Vec<String>,
+    },
     /// Question `qid` is over: answered, or dropped because the turn was cancelled.
     QuestionClosed {
         #[ts(type = "number")]
@@ -91,6 +111,12 @@ pub enum DesktopEvent {
         announced: bool,
         update: SubagentUpdate,
     },
+    /// A turn starts from a button pressed on a surface (no call was waiting on it): pressed
+    /// just now, or held until the last turn ended. Its user message is agent86's
+    /// `[ui action] <name> on <surfaceId>: <context>`.
+    UiActionStarted { action: UiAction },
+    /// A held action was not sent, because the turn it waited for was stopped.
+    UiActionDropped { action: UiAction },
     /// The turn is over and the thread takes a new prompt.
     TurnEnded {
         stop_reason: StopReason,
@@ -235,9 +261,49 @@ impl From<&TurnSummary> for TurnInfo {
     }
 }
 
-impl DesktopEvent {
-    pub fn from_turn_event(event: &TurnEvent<'_>) -> Self {
+/// Maps one turn's events to the UI's, remembering which tool call agent86 is observing so a
+/// `TurnEvent::Ui` (which does not name its call) can be given one.
+///
+/// agent86 announces a step's whole batch of calls first, then, call by call in that order,
+/// emits each one's UI messages and then its result. So the call a UI message belongs to is the
+/// oldest one announced whose result has not come yet; with several calls in a step it is not
+/// the last one announced.
+#[derive(Debug, Default)]
+pub struct TurnMapper {
+    /// Calls announced and not yet answered, in call order.
+    open: VecDeque<String>,
+}
+
+impl TurnMapper {
+    pub fn map(&mut self, event: &TurnEvent<'_>) -> Option<DesktopEvent> {
         match *event {
+            TurnEvent::ToolCall { call, .. } => self.open.push_back(call.id.clone()),
+            TurnEvent::ToolResult { call, .. } => {
+                if let Some(at) = self.open.iter().position(|id| *id == call.id) {
+                    self.open.remove(at);
+                }
+            }
+            TurnEvent::Ui(message) => {
+                return Some(DesktopEvent::Ui {
+                    tool_call_id: self.open.front().cloned(),
+                    // An `AgentMessage` is plain serde data; this cannot fail in practice, and a
+                    // message that did would be dropped rather than end the turn.
+                    message: serde_json::to_value(message).ok()?,
+                });
+            }
+            _ => {}
+        }
+        DesktopEvent::from_turn_event(event)
+    }
+}
+
+impl DesktopEvent {
+    /// The UI's version of `event`, or `None` for an event this app does not show. `TurnEvent` is
+    /// `#[non_exhaustive]` (agent86-core 1.2.0), so a later release may add kinds this does not
+    /// know yet; they are skipped rather than failing the turn. `TurnEvent::Ui` needs the turn's
+    /// state and goes through [`TurnMapper`].
+    pub fn from_turn_event(event: &TurnEvent<'_>) -> Option<Self> {
+        let event = match *event {
             TurnEvent::Text(text) => Self::AgentText { text: text.into() },
             TurnEvent::Thinking(text) => Self::Thought { text: text.into() },
             TurnEvent::Notice(text) => Self::Notice { text: text.into() },
@@ -272,7 +338,9 @@ impl DesktopEvent {
                 notice: notice.into(),
                 summary: summary.map(str::to_owned),
             },
-        }
+            _ => return None,
+        };
+        Some(event)
     }
 }
 
@@ -312,6 +380,20 @@ mod tests {
         assert_eq!(json["type"], "turnEnded");
         assert_eq!(json["stopReason"], "cancelled");
         assert_eq!(json["usage"]["inputTokens"], 0);
+    }
+
+    #[test]
+    fn maps_the_events_it_knows() {
+        assert_eq!(
+            DesktopEvent::from_turn_event(&TurnEvent::Text("hi")),
+            Some(DesktopEvent::AgentText { text: "hi".into() })
+        );
+        assert_eq!(
+            DesktopEvent::from_turn_event(&TurnEvent::Notice("[cancelled]")),
+            Some(DesktopEvent::Notice {
+                text: "[cancelled]".into()
+            })
+        );
     }
 
     #[test]

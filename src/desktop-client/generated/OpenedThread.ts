@@ -35,6 +35,11 @@ sessionId: string,
  */
 history: Array<HistoryItem>, 
 /**
+ * agent86UI: the surfaces the reopened session left up, rebuilt by agent86 from its history,
+ * each as one A2UI `createSurface` message; empty for a new session.
+ */
+surfaces: Array<Record<string, unknown>>, 
+/**
  * Something to know about saving: the embedder fell back, or memory is off.
  */
 memoryNote: string | null, 

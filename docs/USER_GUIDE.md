@@ -96,6 +96,37 @@ limit (steps, output), you can raise it for this turn or stop. If the agent need
 a password), it asks for it by name: the value goes to the tools that need it as an environment
 variable and the model only ever sees `${secret:NAME}`.
 
+### Surfaces the agent draws
+
+When a form, a choice, or a confirmation is easier than a question in prose, the agent can draw it:
+a few fields to fill in, options to pick from, a slider, a date, buttons. This is **agent86UI**,
+agent86's implementation of Google's [A2UI](https://a2ui.org) protocol (agent86 is not affiliated
+with or endorsed by Google). The agent describes the surface; the app draws it with its own
+widgets, so nothing the model writes runs as code.
+
+- **Where it shows.** A surface appears in the conversation where the agent drew it, inside a
+  dashed, blue-tinted frame headed **⧉ Drawn by the agent** and the model's name. When the agent
+  changes it later, it changes in place. Anything inside that frame comes from the model, not from
+  the app: the app's own questions (approvals, limits, secrets) never look like it, and the app
+  never asks for permission or a password inside it.
+- **Answering.** Fill it in and press its button. Usually your answer becomes your next message
+  (it shows as **⧉ You pressed** *submit* **on** *form*; click it for what was sent) and starts a
+  turn. If you press it while the agent is still working, the frame says **Sends when the turn
+  ends** and it goes as soon as that turn is over. Pressing **Stop** drops it.
+- **When the agent waits.** For something it cannot go on without, the agent waits for you: the
+  frame says **The agent is waiting for your answer here**. Press the surface's button to answer,
+  or **Dismiss** to let it carry on without one (the surface stays, and you can still answer later).
+  **Stop** ends the wait too.
+- **Links.** A surface's button may open a web page. The app shows you the whole address and where
+  it goes first, and opens it in your browser only if you agree. Only `http` and `https` links open.
+- **Pictures, video, and sound** show only from files inside the thread's workspace (or embedded in
+  the surface). Media from the web is not loaded, so a surface cannot track you or send data out
+  through an address.
+- **Secrets never go through a surface.** agent86 refuses a password field in a surface; the agent
+  asks for a secret through the app's own secret prompt instead.
+- **Reopening.** When you reopen a session, its surfaces come back where they were, as you last
+  left them. What you typed into a field but never sent is not kept.
+
 ### Sessions
 
 Every thread is saved as it goes, in the same database the CLI uses (`~/.agent86/memory.db`). The

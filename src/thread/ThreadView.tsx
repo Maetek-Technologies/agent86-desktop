@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { openSurfaceUrl } from "../desktop-client/backend.ts";
 import { commandsFor } from "../desktop-client/commands.ts";
-import type { Answer, Approval, OpenedThread } from "../desktop-client/events.ts";
-import type { Entry, Question, SessionState } from "../desktop-client/session-state.ts";
+import type { Answer, Approval, OpenedThread, UiAction } from "../desktop-client/events.ts";
+import type {
+  Entry,
+  LocalAction,
+  Question,
+  SessionState,
+  ToolEntry,
+} from "../desktop-client/session-state.ts";
 import { Markdown } from "../markdown/Markdown.tsx";
 import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
 import { SecretsPanel } from "../secrets/SecretsPanel.tsx";
@@ -14,6 +21,8 @@ import { ModelPicker } from "./ModelPicker.tsx";
 import { PermissionPicker } from "./PermissionPicker.tsx";
 import { ThreadContext } from "./ThreadContext.ts";
 import { ToolCard } from "./ToolCard.tsx";
+import { LinkConfirm } from "./surface/SurfaceFrame.tsx";
+import { SurfaceEntryView, SurfaceProvider, useSurfaces } from "./surface/Surfaces.tsx";
 
 interface Props {
   thread: OpenedThread;
@@ -21,6 +30,10 @@ interface Props {
   onSend: (text: string, mentions: string[]) => void;
   onStop: () => void;
   onAnswer: (qid: number, answer: Answer) => void;
+  /** A button pressed on a surface no call waits on (agent86UI). */
+  onUiAction: (action: UiAction) => void;
+  /** A change the thread makes to its own state (a surface's input, a warning). */
+  onLocal: (action: LocalAction) => void;
   findFiles: (query: string) => Promise<string[]>;
   /** The secrets panel is open beside the transcript. */
   secretsOpen: boolean;
@@ -41,6 +54,8 @@ export function ThreadView({
   onSend,
   onStop,
   onAnswer,
+  onUiAction,
+  onLocal,
   findFiles,
   secretsOpen,
   onSecrets,
@@ -56,6 +71,14 @@ export function ThreadView({
   // agent86 asks one question at a time; the oldest open one is the one it waits on.
   const question = state.questions[0];
   const commands = useMemo(() => commandsFor(thread.capabilities), [thread.capabilities]);
+  const surfaces = useSurfaces({
+    threadId: thread.threadId,
+    model: thread.model,
+    state,
+    onAnswer,
+    onUiAction,
+    onLocal,
+  });
 
   // Follow the stream as it grows.
   useEffect(() => {
@@ -135,9 +158,11 @@ export function ThreadView({
           <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3" aria-live="polite">
             <div className="mx-auto max-w-4xl">
               {state.entries.length === 0 && <Welcome thread={thread} />}
-              {state.entries.map((entry) => (
-                <EntryView key={entry.id} entry={entry} />
-              ))}
+              <SurfaceProvider value={surfaces.context}>
+                {state.entries.map((entry) => (
+                  <EntryView key={entry.id} entry={entry} />
+                ))}
+              </SurfaceProvider>
               {state.running && !state.cancelling && !question && last?.kind !== "agent" && (
                 <div className="my-2 text-sm text-muted">Working…</div>
               )}
@@ -150,7 +175,9 @@ export function ThreadView({
             </div>
           )}
         </div>
-        {question && question.kind !== "secret" && (
+        {/* A surface the turn waits on is answered on the surface itself (agent86UI), never in
+            this panel, which is agent86's own. */}
+        {question && question.kind !== "secret" && question.kind !== "ui" && (
           <div className="max-h-[60vh] overflow-y-auto border-t border-border bg-bg px-4 py-3">
             <div className="mx-auto max-w-4xl">
               <QuestionPanel key={question.qid} question={question} onAnswer={onAnswer} />
@@ -180,6 +207,20 @@ export function ThreadView({
             onDecline={() =>
               onAnswer(question.qid, { type: "secret", value: null, remember: false })
             }
+          />
+        )}
+        {surfaces.link !== null && (
+          <LinkConfirm
+            url={surfaces.link}
+            onCancel={surfaces.closeLink}
+            onOpen={() => {
+              const url = surfaces.link;
+              surfaces.closeLink();
+              if (url)
+                openSurfaceUrl(url).catch((e: unknown) =>
+                  onLocal({ type: "local/warning", text: String(e) }),
+                );
+            }}
           />
         )}
         {reviewing && (
@@ -219,7 +260,7 @@ function QuestionPanel({
   question,
   onAnswer,
 }: {
-  question: Exclude<Question, { kind: "secret" }>;
+  question: Exclude<Question, { kind: "secret" | "ui" }>;
   onAnswer: (qid: number, answer: Answer) => void;
 }) {
   switch (question.kind) {
@@ -243,12 +284,29 @@ function QuestionPanel({
 
 function EntryView({ entry }: { entry: Entry }) {
   switch (entry.kind) {
-    case "user":
+    case "user": {
+      const pressed = UI_ACTION.exec(entry.text);
+      if (pressed) {
+        // A surface's button, as agent86 words it for the model: shown as what the user did.
+        return (
+          <details className="my-3 rounded-md bg-panel-2 px-3 py-2 text-sm">
+            <summary className="cursor-pointer select-none">
+              <span className="text-agent">⧉</span> You pressed{" "}
+              <span className="font-mono">{pressed[1]}</span> on{" "}
+              <span className="font-mono">{pressed[2]}</span>
+            </summary>
+            <div className="mt-1 font-mono text-xs break-all whitespace-pre-wrap text-muted">
+              {entry.text}
+            </div>
+          </details>
+        );
+      }
       return (
         <div className="my-3 rounded-md bg-panel-2 px-3 py-2 text-sm whitespace-pre-wrap">
           {entry.text}
         </div>
       );
+    }
     case "agent":
       return (
         <div className="my-2 text-sm">
@@ -271,7 +329,13 @@ function EntryView({ entry }: { entry: Entry }) {
         </div>
       );
     case "tool":
-      return <ToolCard entry={entry} />;
+      return entry.name === "render_ui" ? (
+        <RenderUiNote entry={entry} />
+      ) : (
+        <ToolCard entry={entry} />
+      );
+    case "surface":
+      return <SurfaceEntryView entry={entry} />;
     case "list":
       return (
         <div className="my-3 rounded-md border border-border bg-panel p-3 text-sm">
@@ -292,4 +356,27 @@ function EntryView({ entry }: { entry: Entry }) {
     case "turnSummary":
       return <TurnSummaryLine turn={entry.turn} cancelled={entry.cancelled} />;
   }
+}
+
+/** agent86's user message for a surface action: `[ui action] <name> on <surfaceId>: <context>`. */
+const UI_ACTION = /^\[ui action\] (\S+) on (\S+): /;
+
+/** A `render_ui` call, in one line: the surface it drew shows on its own. A refused batch opens
+ * to agent86's list of problems. */
+function RenderUiNote({ entry }: { entry: ToolEntry }) {
+  const status =
+    entry.status === "running" ? "drawing…" : entry.status === "failed" ? "not drawn" : "drawn";
+  return (
+    <details className="my-1 text-xs text-muted" open={entry.status === "failed" && undefined}>
+      <summary className="cursor-pointer select-none">
+        <span className="text-agent">⧉</span> render_ui · {status}
+        {entry.summary ? ` · ${entry.summary}` : ""}
+      </summary>
+      {entry.output && (
+        <pre className="mt-1 overflow-x-auto rounded border border-border bg-panel-2 p-2 whitespace-pre-wrap">
+          {entry.output}
+        </pre>
+      )}
+    </details>
+  );
 }

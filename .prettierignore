@@ -6,3 +6,4 @@ src-tauri/gen
 src-tauri/icons
 docs
 src/desktop-client/generated
+src/thread/surface/runtime/fixtures
