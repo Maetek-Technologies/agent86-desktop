@@ -21,6 +21,8 @@ export interface SurfaceHost {
   press: (node: Node) => void;
   /** A workspace-relative media path as a URL of the app's media scheme. */
   workspaceSrc: (path: string) => string;
+  /** The user sent from this surface: its fields and buttons are disabled until it unlocks. */
+  locked: boolean;
 }
 
 const str = (value: Json | undefined): string =>
@@ -411,7 +413,7 @@ function SurfaceButton({
     <span className="inline-flex flex-col">
       <button
         type="button"
-        disabled={blocked.length > 0}
+        disabled={host.locked || blocked.length > 0}
         title={blocked.join("\n") || undefined}
         aria-label={label(node)}
         onClick={() => host.press(node)}
@@ -445,7 +447,7 @@ function useBound(node: Node, host: SurfaceHost, property: string) {
 }
 
 const FIELD =
-  "w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-agent";
+  "w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text outline-none focus:border-agent disabled:opacity-60";
 
 function SurfaceTextField({ node, host }: { node: Node; host: SurfaceHost }) {
   const id = useId();
@@ -460,6 +462,7 @@ function SurfaceTextField({ node, host }: { node: Node; host: SurfaceHost }) {
     "aria-invalid": problems(node).length > 0 || undefined,
     "aria-describedby": `${id}-problems`,
     className: FIELD,
+    disabled: host.locked,
   };
   return (
     <div className="min-w-0">
@@ -491,6 +494,7 @@ function SurfaceCheckBox({ node, host }: { node: Node; host: SurfaceHost }) {
         <input
           type="checkbox"
           checked={value === true}
+          disabled={host.locked}
           onChange={(e) => set(e.target.checked)}
           aria-describedby={`${id}-problems`}
           className="accent-[var(--agent)]"
@@ -530,7 +534,7 @@ function SurfaceChoicePicker({ node, host }: { node: Node; host: SurfaceHost }) 
     );
   const chips = p.displayStyle === "chips";
   return (
-    <fieldset className="min-w-0" aria-describedby={`${id}-problems`}>
+    <fieldset className="min-w-0" disabled={host.locked} aria-describedby={`${id}-problems`}>
       {str(p.label) && <legend className="mb-1 text-xs text-muted">{str(p.label)}</legend>}
       {p.filterable === true && (
         <input
@@ -594,6 +598,7 @@ function SurfaceSlider({ node, host }: { node: Node; host: SurfaceHost }) {
         max={max}
         step={step}
         value={current}
+        disabled={host.locked}
         onChange={(e) => set(Number(e.target.value))}
         aria-describedby={`${id}-problems`}
         className="w-full accent-[var(--agent)]"
@@ -625,6 +630,7 @@ function SurfaceDateTime({ node, host }: { node: Node; host: SurfaceHost }) {
         value={shown(str(value))}
         min={typeof p.min === "string" ? shown(p.min) : undefined}
         max={typeof p.max === "string" ? shown(p.max) : undefined}
+        disabled={host.locked}
         onChange={(e) => set(e.target.value)}
         aria-label={str(p.label) ? undefined : label(node)}
         aria-describedby={`${id}-problems`}

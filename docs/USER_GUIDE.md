@@ -113,6 +113,10 @@ widgets, so nothing the model writes runs as code.
   (it shows as **⧉ You pressed** *submit* **on** *form*; click it for what was sent) and starts a
   turn. If you press it while the agent is still working, the frame says **Sends when the turn
   ends** and it goes as soon as that turn is over. Pressing **Stop** drops it.
+- **After you send.** The surface locks so nothing is sent twice: its fields and buttons grey out
+  and the frame says **Sent**. To change your answer, click **Change and send again**. When the
+  agent changes the surface (to show a result, say), it unlocks by itself. A button that only
+  opens a link does not lock anything.
 - **When the agent waits.** For something it cannot go on without, the agent waits for you: the
   frame says **The agent is waiting for your answer here**. Press the surface's button to answer,
   or **Dismiss** to let it carry on without one (the surface stays, and you can still answer later).

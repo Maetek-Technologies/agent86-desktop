@@ -316,6 +316,13 @@ agent86-core 1.2.0, now pinned. `TurnEvent`, `BuildError`, `RunError`, and `RunR
   agent86's `[ui] agent86ui_remote_media` arrives with ACP in 1.2.1). `openUrl` asks first and
   `open_surface_url` refuses anything but http and https, and links with credentials in them.
 
+**After 1.1.0: a surface locks once sent.** A2UI leaves a surface live after a press, which let a
+form be sent twice. The renderer now locks a surface when the user sends an action from it
+(`uiSent`): fields and buttons are disabled and the frame says **Sent**, with **Change and send
+again** to unlock. Any message from the agent naming the surface unlocks it, as does a held press
+that Stop dropped. A press that only runs a local function (`openUrl`) does not lock. A reopened
+session's surfaces start unlocked (nothing is stored).
+
 ## 8. Testing
 
 - **Rust:** a scripted `MockProvider` implementing `sdk::providers::Provider` (no network) drives

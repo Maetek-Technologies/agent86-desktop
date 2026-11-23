@@ -227,4 +227,49 @@ describe("agent86UI surfaces", () => {
     expect(screen.queryByRole("region")).toBeNull();
     expect(screen.getByText(/The agent removed the surface/)).toBeTruthy();
   });
+
+  it("locks the surface once sent, until the user unlocks it to send again", () => {
+    const onUiAction = vi.fn();
+    render(<Harness events={[nameForm]} onUiAction={onUiAction} />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ada" } });
+    const ok = screen.getByRole("button", { name: "OK" }) as HTMLButtonElement;
+    fireEvent.click(ok);
+    expect(onUiAction).toHaveBeenCalledTimes(1);
+    expect(ok.disabled).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>("Name").disabled).toBe(true);
+    expect(screen.getByText("Sent")).toBeTruthy();
+    // A second click while locked sends nothing.
+    fireEvent.click(ok);
+    expect(onUiAction).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change and send again" }));
+    expect(ok.disabled).toBe(false);
+    expect(screen.getByLabelText<HTMLInputElement>("Name").disabled).toBe(false);
+    expect(screen.queryByText("Sent")).toBeNull();
+    fireEvent.click(ok);
+    expect(onUiAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not lock for a button that only opens a link", () => {
+    render(
+      <Harness
+        events={[
+          surface([
+            {
+              id: "root",
+              component: "Button",
+              child: "l",
+              action: { functionCall: { "@call": "openUrl", args: { url: "https://a.example/" } } },
+            },
+            { id: "l", component: "Text", text: "Docs" },
+          ]),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+    expect(screen.queryByText("Sent")).toBeNull();
+    expect((screen.getByRole("button", { name: "Docs" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
 });

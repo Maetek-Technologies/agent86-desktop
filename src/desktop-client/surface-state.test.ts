@@ -114,4 +114,14 @@ describe("agent86UI surfaces in the session state", () => {
     expect(state.uiLog).toHaveLength(2);
     expect(state.uiLog[1]).toMatchObject({ updateDataModel: { value: "Ada" } });
   });
+
+  it("locks a surface the user sent from until the agent changes it or the user unlocks it", () => {
+    const sent = fold(create("form"), { type: "local/uiSent", surfaceId: "form" });
+    expect(sent.uiSent).toEqual(["form"]);
+    expect(reduce(sent, update).uiSent).toEqual([]);
+    expect(reduce(sent, { type: "local/uiUnlock", surfaceId: "form" }).uiSent).toEqual([]);
+    expect(reduce(sent, { type: "uiActionDropped", action }).uiSent).toEqual([]);
+    // Another surface's change leaves it locked.
+    expect(reduce(sent, create("other")).uiSent).toEqual(["form"]);
+  });
 });
