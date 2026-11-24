@@ -176,6 +176,25 @@ manager). Only files inside the thread's workspace, or a worktree its sub-agents
 opened. Programs and scripts are only revealed, never opened, so a file the agent wrote cannot run
 by a click.
 
+### Reading Markdown documents
+
+A Markdown file on a card (`.md`, `.markdown`) also has **view**: it opens rendered, in a pane beside
+the conversation, the way GitHub shows it: headings, lists and task lists, tables, `> [!NOTE]`
+alerts, footnotes, highlighted code, and front matter as a folded table. A finished reply has
+**View as document** (under it, when you point at it) to open it in the same pane.
+
+- **Rendered** and **Raw** switch between the document and its source. **Contents** lists its
+  headings; click one to go there.
+- **Links:** web and mail links open in your browser or mail app. A link to another Markdown file in
+  the workspace opens it in the pane (**←** goes back); a link to any other file, or a reference
+  such as `src/app.ts:42`, opens that file in its default app, with the same rules as **open**.
+  Links to anything else are shown, not followed.
+- **Images are never loaded,** as in replies: each shows as **[image: …]**, a link you can follow
+  if you want to see it. Raw HTML in a document shows as text. Math and Mermaid diagrams show as
+  their source for now.
+- Drag the pane's left edge to resize it (the app remembers the width); **✕** or **Esc** closes it.
+  Each thread has its own pane. Files over 2 MB, or not UTF-8 text, are not shown.
+
 ## Memory, secrets, and projects
 
 - **Memory** (sidebar, or `/memory`) lists the facts and episodes the agent remembers, shared with

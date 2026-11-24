@@ -50,6 +50,9 @@ the app does.
 - **Open and reveal** on a tool card work only for files inside the thread's workspace or a
   worktree its sub-agents kept. Programs and scripts (`.exe`, `.bat`, `.sh`, `.app`, ...) are only
   revealed in Explorer or Finder, never opened.
+- **The Markdown viewer** reads only files inside the thread's workspace or a kept worktree, up to
+  2 MB of UTF-8. Documents render without raw HTML, then pass DOMPurify; images are never loaded,
+  links never navigate the window, and only http, https, and mailto links leave the app.
 - **Appearance** (Settings): theme, notifications, and the tray icon. The window's size and place
   are kept in `window-state.json` beside `settings.json`.
 - To try the app without touching your real settings (a first run, say), start it with

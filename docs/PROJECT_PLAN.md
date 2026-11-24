@@ -366,7 +366,7 @@ redraw it; `render_ui` refuses the prefix.
 
 ## 7a. Next releases
 
-**1.2.0 (next): Markdown viewer.** Markdown the agent writes to files is shown today only as raw
+**1.2.0 (next): Markdown viewer.** Built (steps 1–7 below); released with the version bump. Markdown the agent writes to files is shown today only as raw
 source (the `new-file` detail on a tool card) or handed to another app with **open**. 1.2.0 adds a
 viewer pane, rendered with [`mdglass`](https://www.npmjs.com/package/mdglass) (markdown-it, GFM
 extras, highlight.js, front matter, heading list, `file:line` references). Chat replies keep
@@ -381,7 +381,7 @@ the viewer.
 | 4 | Pane in `ThreadView` | *Done.* `DocumentPane` beside the transcript, state per thread in `ThreadView` (`useDocuments`: a stack, so ← goes back from a followed link; a load that finishes after another document opened is dropped), so `Tab` and the tabs reducer are untouched. ✕ or Esc inside it closes it, and the focus goes back where it was; it takes the focus for each document. Resizable from its left edge (`ResizeHandle`, now shared with the sessions panel), 300 to 960 px and at most 70% of the thread, kept in localStorage (`agent86.document-pane.v1`) and read each time it opens. `ThreadContext` carries `openFile` and `openDocument` for step 5. Links in the viewer are styled as in chat |
 | 5 | Entry points | *Done.* **view** beside open and reveal (`FileActions`) for `.md`, `.markdown`, `.mdown`, and `.mkd` paths: on tool cards (reads, new files, and edits) and a kept worktree's files; it calls `ThreadContext.openFile`. **View as document** under a finished assistant reply (shown on hover or focus, not while it streams) opens its text in the pane without a file read |
 | 6 | Look | *Done.* `mdglass/styles.css` loads with the viewer's lazy chunk; `.md-document` (styles.css) sets its `--mdg-*` colours to the app's tokens on the element, so light and dark follow `theme.ts` and win over mdglass's `:root` defaults; alerts use `--hl-title`, `--ok`, `--hl-keyword`, `--warn`, and `--error`. Code is highlighted with lowlight's grammars and the app's `hljs-*` colours (step 2), boxed like chat's code blocks; inline code, links, and footnotes look as in chat; wide tables and code scroll inside the pane. No inline styles: checked in a production build under the release CSP (no violations, no `style` attributes in the document) |
-| 7 | Tests and docs | Vitest: the sanitizer (`<script>`, `on*` attributes, `javascript:` links, images), link routing, the toggle; USER_GUIDE section; security notes; `docs/releases/v1.2.0.md` |
+| 7 | Tests and docs | *Done.* Vitest: the sanitizer and safe rendering (`viewer.test.tsx`: raw HTML as text, images, `javascript:`, plugin output), link sorting and routing (`links.test.ts`, `follow.test.ts`), the toggle and contents, the pane (`document-pane.test.tsx`), the stack (`documents.test.ts`), the entry points (`toolcard.test.tsx`, an App test from a reopened session); Rust: `read_text` and `checked_document_link`. USER_GUIDE, "Reading Markdown documents"; the README's security notes and §5 here; `docs/releases/v1.2.0.md`. The version stays 1.1.3 until the release's own bump |
 
 Dependencies: `mdglass` 0.1.0 and `dompurify` 3.4.18 (the settled 3.4 line, not the days-old 3.5.0),
 pinned. mdglass's `katex: ^0.16` has a low advisory (GHSA-238p-pmpm-9mq7, fixed in 0.18.2) that
