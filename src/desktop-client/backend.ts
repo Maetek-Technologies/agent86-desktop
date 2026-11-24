@@ -26,6 +26,7 @@ import type {
   SessionList,
   Settings,
   SettingsState,
+  TextFile,
   TurnRequest,
   UiAction,
   UpdateInfo,
@@ -183,6 +184,14 @@ export function onActivateTab(handler: (tab: string) => void): Promise<() => voi
  */
 export function openPath(threadId: string, path: string, reveal: boolean): Promise<void> {
   return invoke("open_path", { threadId, path, reveal });
+}
+
+/**
+ * Read a file of the thread's as UTF-8 text (at most 2 MB), for the Markdown viewer. The same rule
+ * as `openPath`: only inside the thread's workspace or a worktree its sub-agents kept.
+ */
+export function readTextFile(threadId: string, path: string): Promise<TextFile> {
+  return invoke<TextFile>("read_text_file", { threadId, path });
 }
 
 /** Ask GitHub Releases for a newer version; `null` when this is the latest. */

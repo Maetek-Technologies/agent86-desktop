@@ -842,6 +842,26 @@ pub async fn open_path(
     .map_err(|error| error.to_string())?
 }
 
+/// Read `path` as UTF-8 text for a viewer (the Markdown viewer). The same rule as `open_path`:
+/// only files inside thread `thread_id`'s workspace or a worktree its sub-agents kept; at most
+/// `file_actions::MAX_TEXT_BYTES`.
+#[tauri::command]
+pub async fn read_text_file(
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+    path: String,
+) -> Result<file_actions::TextFile, String> {
+    let roots = threads.file_roots(&thread_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = file_actions::resolve(&path, &roots).inspect_err(|error| {
+            log::warn!("Read refused: {error}");
+        })?;
+        file_actions::read_text(&resolved, file_actions::MAX_TEXT_BYTES)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Look for a newer version on GitHub Releases. `None` when this one is the latest.
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {

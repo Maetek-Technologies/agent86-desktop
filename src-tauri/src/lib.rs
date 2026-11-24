@@ -138,6 +138,7 @@ pub fn run() {
             commands::list_models,
             commands::notify,
             commands::open_path,
+            commands::read_text_file,
             commands::check_update,
             commands::install_update,
             commands::restart_app,

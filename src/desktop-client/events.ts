@@ -53,6 +53,7 @@ export type { SettingsState } from "./generated/SettingsState";
 export type { SkillSettings } from "./generated/SkillSettings";
 export type { StopReason } from "./generated/StopReason";
 export type { SubagentUpdate } from "./generated/SubagentUpdate";
+export type { TextFile } from "./generated/TextFile";
 export type { Theme } from "./generated/Theme";
 export type { ToolSettings } from "./generated/ToolSettings";
 export type { TraceSettings } from "./generated/TraceSettings";
