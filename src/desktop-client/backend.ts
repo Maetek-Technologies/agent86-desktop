@@ -185,6 +185,12 @@ export function openPath(threadId: string, path: string, reveal: boolean): Promi
   return invoke("open_path", { threadId, path, reveal });
 }
 
+/** Open an http, https, or mailto link from a chat reply in the system's browser or mail app.
+ * Rust checks it again. */
+export function openDocumentLink(url: string): Promise<void> {
+  return invoke("open_document_link", { url });
+}
+
 /** Ask GitHub Releases for a newer version; `null` when this is the latest. */
 export function checkUpdate(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_update");
