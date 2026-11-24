@@ -23,7 +23,7 @@ import { PromptInput } from "./PromptInput.tsx";
 import { ContextMeter, TurnSummaryLine } from "./Spend.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { PermissionPicker } from "./PermissionPicker.tsx";
-import { ThreadContext } from "./ThreadContext.ts";
+import { ThreadContext, useThread } from "./ThreadContext.ts";
 import { ToolCard } from "./ToolCard.tsx";
 import { LinkConfirm } from "./surface/SurfaceFrame.tsx";
 import { SurfaceEntryView, SurfaceProvider, useSurfaces } from "./surface/Surfaces.tsx";
@@ -183,6 +183,7 @@ export function ThreadView({
                     key={entry.id}
                     entry={entry}
                     formShown={entry.kind === "tool" && drawnFor.has(entry.toolCallId)}
+                    streaming={state.running && entry === last}
                   />
                 ))}
               </SurfaceProvider>
@@ -307,8 +308,16 @@ function QuestionPanel({
 }
 
 /** `formShown`: an `ask_user` call's form is in the transcript (this session drew it; a reopened
- * one shows only the call). */
-function EntryView({ entry, formShown = false }: { entry: Entry; formShown?: boolean }) {
+ * one shows only the call). `streaming`: the entry is still growing. */
+function EntryView({
+  entry,
+  formShown = false,
+  streaming = false,
+}: {
+  entry: Entry;
+  formShown?: boolean;
+  streaming?: boolean;
+}) {
   switch (entry.kind) {
     case "user": {
       const pressed = UI_ACTION.exec(entry.text);
@@ -335,8 +344,9 @@ function EntryView({ entry, formShown = false }: { entry: Entry; formShown?: boo
     }
     case "agent":
       return (
-        <div className="my-2 text-sm">
+        <div className="group my-2 text-sm">
           <Markdown text={entry.text} />
+          {!streaming && <ViewAsDocument text={entry.text} />}
         </div>
       );
     case "thought":
@@ -383,6 +393,25 @@ function EntryView({ entry, formShown = false }: { entry: Entry; formShown?: boo
     case "turnSummary":
       return <TurnSummaryLine turn={entry.turn} cancelled={entry.cancelled} />;
   }
+}
+
+/** A finished reply, opened in the document pane: rendered with mdglass, with a contents list
+ * and its source. Shown on hover or focus, like a session's rename. */
+function ViewAsDocument({ text }: { text: string }) {
+  const { openDocument } = useThread();
+  if (!openDocument) return null;
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={() => openDocument("Reply", text)}
+        title="Open this reply beside the conversation, with its contents and source"
+        className="rounded px-1.5 text-xs text-muted opacity-0 group-hover:opacity-100 hover:bg-panel-2 hover:text-text focus:opacity-100"
+      >
+        View as document
+      </button>
+    </div>
+  );
 }
 
 /** agent86's user message for a surface action: `[ui action] <name> on <surfaceId>: <context>`. */

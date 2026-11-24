@@ -88,4 +88,20 @@ describe("ToolCard", () => {
     fireEvent.click(screen.getByRole("button", { expanded: false }));
     expect(screen.getByText("Not executed: declined by user.")).toBeTruthy();
   });
+
+  it("offers view for a Markdown file when the thread has a document pane", () => {
+    const opened: string[] = [];
+    const card = (path: string, openFile?: (path: string) => void) => (
+      <ThreadContext.Provider value={{ cwd: "/w", threadId: "t1", openFile }}>
+        <ToolCard entry={entry({ name: "write_file", arguments: { path }, status: "completed" })} />
+      </ThreadContext.Provider>
+    );
+    const { rerender } = render(card("docs/Plan.MD", (path) => opened.push(path)));
+    fireEvent.click(screen.getByRole("button", { name: "view" }));
+    expect(opened).toEqual(["docs/Plan.MD"]);
+    rerender(card("src/main.rs", (path) => opened.push(path)));
+    expect(screen.queryByRole("button", { name: "view" })).toBeNull();
+    rerender(card("docs/plan.md"));
+    expect(screen.queryByRole("button", { name: "view" })).toBeNull();
+  });
 });

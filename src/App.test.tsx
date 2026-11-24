@@ -247,6 +247,58 @@ test("reopens a saved session in its folder, with its conversation, once", async
   expect(calls.filter((c) => c.cmd === "open_thread")).toHaveLength(1);
 });
 
+test("shows a Markdown file a tool wrote, and a reply, in the document pane", async () => {
+  const calls = backend((cmd, args) => {
+    if (cmd === "open_thread" && args.sessionId === "s-old")
+      return opened("t1", "C:\\code\\parser", "s-old", [
+        { kind: "user", text: "write the plan" },
+        {
+          kind: "tool",
+          id: "c1",
+          name: "write_file",
+          arguments: { path: "docs/plan.md" },
+          output: "Wrote docs/plan.md",
+          ok: true,
+        },
+        {
+          kind: "tool",
+          id: "c2",
+          name: "write_file",
+          arguments: { path: "src/main.rs" },
+          output: "Wrote src/main.rs",
+          ok: true,
+        },
+        { kind: "agent", text: "## Summary\n\nThe plan is written." },
+      ]);
+    if (cmd === "read_text_file")
+      return { path: "C:\\code\\parser\\docs\\plan.md", text: "# The plan\n\nStep one." };
+    return undefined;
+  });
+  render(<App />);
+  const list = await screen.findByRole("navigation", { name: "Sessions" });
+  fireEvent.click(await within(list).findByText("Fix the parser"));
+  await screen.findByText("The plan is written.");
+
+  // Only the Markdown file offers "view".
+  const view = screen.getAllByRole("button", { name: "view" });
+  expect(view).toHaveLength(1);
+  fireEvent.click(view[0]!);
+  const pane = await screen.findByRole("complementary", { name: "Document" });
+  expect(await within(pane).findByRole("heading", { name: "The plan" })).toBeTruthy();
+  expect(within(pane).getByText("plan.md")).toBeTruthy();
+  expect(calls.find((c) => c.cmd === "read_text_file")?.args).toEqual({
+    threadId: "t1",
+    path: "docs/plan.md",
+  });
+
+  // A finished reply opens as a document too, in place of the file.
+  fireEvent.click(screen.getByRole("button", { name: "View as document" }));
+  expect(await within(pane).findByRole("heading", { name: "Summary" })).toBeTruthy();
+  expect(within(pane).queryByRole("heading", { name: "The plan" })).toBeNull();
+  fireEvent.click(within(pane).getByRole("button", { name: "Close document" }));
+  expect(screen.queryByRole("complementary", { name: "Document" })).toBeNull();
+});
+
 test("asks for the folder of a session the app does not know", async () => {
   const calls = backend();
   render(<App />);
