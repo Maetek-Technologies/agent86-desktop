@@ -383,9 +383,14 @@ the viewer.
 | 6 | Look | `mdglass/styles.css` mapped onto the app's CSS variables, so light and dark follow `theme.ts`; a highlight.js theme matching the lowlight colours; no inline styles, so the release CSP (`style-src 'self'`) needs no change |
 | 7 | Tests and docs | Vitest: the sanitizer (`<script>`, `on*` attributes, `javascript:` links, images), link routing, the toggle; USER_GUIDE section; security notes; `docs/releases/v1.2.0.md` |
 
-Dependencies: `mdglass` pinned at an exact version (0.1.0 or later), `dompurify` pinned; both pass
-`pnpm audit --prod`. Not in 1.2.0: math, Mermaid, local images, editing, live reload of a changed
-file.
+Dependencies: `mdglass` 0.1.0 and `dompurify` 3.4.18 (the settled 3.4 line, not the days-old 3.5.0),
+pinned. mdglass's `katex: ^0.16` has a low advisory (GHSA-238p-pmpm-9mq7, fixed in 0.18.2) that
+fails `pnpm audit --prod`, so `pnpm.overrides` pins `mdglass>katex` to 0.19.1 until mdglass widens
+its range; KaTeX is tree-shaken out anyway (math is off). `highlight.js` 11.11.2 is a direct
+dependency for `src/highlight/hljs-common.ts`: mdglass highlights with lowlight's grammars, and
+`vite.config.ts` aliases `highlight.js/lib/common` there, so the grammars are bundled once. The
+viewer's renderer (`viewer-engine.ts`) is a lazy chunk. Not in 1.2.0: math, Mermaid, local images,
+editing, live reload of a changed file.
 
 **After 1.2.0, in this order.** Collected from the notes above (not-yet-done and not-verified
 items) and §8; each is a release of its own unless small enough to ride along.

@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // Tauri loads the dev server from this fixed port (src-tauri/tauri.conf.json `devUrl`).
@@ -7,6 +8,16 @@ const PORT = 1420;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: [
+      // mdglass imports this by default; it would bring a second copy of every grammar
+      // (src/highlight/hljs-common.ts).
+      {
+        find: /^highlight\.js\/lib\/common$/,
+        replacement: fileURLToPath(new URL("./src/highlight/hljs-common.ts", import.meta.url)),
+      },
+    ],
+  },
   // Keep Rust build output out of Vite's file watcher.
   clearScreen: false,
   server: {
