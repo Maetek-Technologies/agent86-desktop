@@ -1,6 +1,7 @@
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { openDocumentLink } from "../desktop-client/backend.ts";
 import { Highlight } from "../highlight/Highlight.tsx";
 import { normalizeLanguage } from "../highlight/languages.ts";
 import { safeUrl, splitBlocks } from "./blocks.ts";
@@ -48,6 +49,18 @@ function textOf(node: ReactNode): string {
   return "";
 }
 
+/**
+ * Open a reply's link outside the app. The webview never follows it itself (it would navigate the
+ * app away, or do nothing for `target="_blank"`), and has no opener permission: Rust opens it
+ * through `open_document_link`, after checking it again.
+ */
+function openLink(event: MouseEvent<HTMLAnchorElement>, url: string) {
+  event.preventDefault();
+  openDocumentLink(url).catch((error: unknown) => {
+    console.warn(`Could not open ${url}:`, error);
+  });
+}
+
 const components: Components = {
   a({ href, children }) {
     const url = href ? safeUrl(href) : undefined;
@@ -58,6 +71,7 @@ const components: Components = {
         target="_blank"
         rel="noopener noreferrer nofollow"
         className="text-accent underline"
+        onClick={(event) => openLink(event, url)}
       >
         {children}
       </a>
@@ -73,6 +87,7 @@ const components: Components = {
         target="_blank"
         rel="noopener noreferrer nofollow"
         className="text-accent underline"
+        onClick={(event) => openLink(event, url)}
       >
         [{label}]
       </a>

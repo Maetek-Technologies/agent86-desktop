@@ -3,8 +3,8 @@
 //! `http` or `https`, since a URL from a binding or a function is known only once the renderer
 //! resolves it, after agent86 checked the surface.
 //!
-//! Links in a Markdown document the viewer shows go through `checked_document_link`: the same
-//! rules, plus `mailto:`.
+//! Links in a chat reply or in a Markdown document the viewer shows go through
+//! `checked_document_link`: the same rules, plus `mailto:`.
 
 use tauri::Url;
 
@@ -27,8 +27,9 @@ pub fn checked(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-/// `raw` as a link a Markdown document may open (the viewer, docs/PROJECT_PLAN.md §7a): what
-/// `checked` allows, or a `mailto:` with an address and nothing else to run.
+/// `raw` as a link Markdown from the model may open (a chat reply, or a document in the viewer,
+/// docs/PROJECT_PLAN.md §7a): what `checked` allows, or a `mailto:` with an address and nothing
+/// else to run.
 pub fn checked_document_link(raw: &str) -> Result<Url, String> {
     let url = Url::parse(raw.trim()).map_err(|_| "That is not a web address.".to_owned())?;
     match url.scheme() {

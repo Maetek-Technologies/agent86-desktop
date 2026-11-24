@@ -194,7 +194,8 @@ export function readTextFile(threadId: string, path: string): Promise<TextFile> 
   return invoke<TextFile>("read_text_file", { threadId, path });
 }
 
-/** Open an http, https, or mailto link from a document in the Markdown viewer. Rust checks it. */
+/** Open an http, https, or mailto link from a chat reply or a document in the Markdown viewer, in
+ * the system's browser or mail app. Rust checks it again. */
 export function openDocumentLink(url: string): Promise<void> {
   return invoke("open_document_link", { url });
 }

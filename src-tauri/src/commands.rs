@@ -842,8 +842,10 @@ pub async fn open_path(
     .map_err(|error| error.to_string())?
 }
 
-/// Open a link from a Markdown document in the viewer: http, https, or mailto
-/// (`surface_links::checked_document_link`), with the system's browser or mail app.
+/// Open a link from Markdown the model wrote (a chat reply, or a document in the Markdown viewer):
+/// http, https, or mailto (`surface_links::checked_document_link`), with the system's browser or
+/// mail app. The webview has no opener permission of its own (capabilities/default.json), so this
+/// is the only way out.
 #[tauri::command]
 pub fn open_document_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;

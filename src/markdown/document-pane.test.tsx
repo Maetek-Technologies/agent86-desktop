@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openPath, readTextFile } from "../desktop-client/backend.ts";
 import { DocumentPane } from "./DocumentPane.tsx";
 import { useDocuments, type Documents } from "./useDocuments.ts";
@@ -32,6 +32,10 @@ function Harness() {
 }
 /** The pane's controls, as the thread view hands them out. */
 const docs = () => handle.current!;
+
+// The viewer loads its renderer on first use; load it up front, so a cold module transform
+// (mdglass, DOMPurify, grammars) does not count against the waits below.
+beforeAll(() => import("./viewer-engine.ts"), 30_000);
 
 beforeEach(() => {
   window.localStorage.clear();

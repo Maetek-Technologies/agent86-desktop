@@ -72,7 +72,14 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
+        // Used from Rust only. Its default injects a click listener that sends every
+        // target="_blank" link to `plugin:opener|open_url`, which the webview may not call, so a
+        // chat link did nothing; links go through `open_document_link` instead.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         // agent86UI surfaces' workspace media, resolved per thread (src/surface_media.rs).
         .register_asynchronous_uri_scheme_protocol(surface_media::SCHEME, surface_media::handle)
