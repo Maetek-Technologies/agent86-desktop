@@ -26,6 +26,7 @@ import type {
   SessionList,
   Settings,
   SettingsState,
+  TextFile,
   TurnRequest,
   UiAction,
   UpdateInfo,
@@ -185,8 +186,16 @@ export function openPath(threadId: string, path: string, reveal: boolean): Promi
   return invoke("open_path", { threadId, path, reveal });
 }
 
-/** Open an http, https, or mailto link from a chat reply in the system's browser or mail app.
- * Rust checks it again. */
+/**
+ * Read a file of the thread's as UTF-8 text (at most 2 MB), for the Markdown viewer. The same rule
+ * as `openPath`: only inside the thread's workspace or a worktree its sub-agents kept.
+ */
+export function readTextFile(threadId: string, path: string): Promise<TextFile> {
+  return invoke<TextFile>("read_text_file", { threadId, path });
+}
+
+/** Open an http, https, or mailto link from a chat reply or a document in the Markdown viewer, in
+ * the system's browser or mail app. Rust checks it again. */
 export function openDocumentLink(url: string): Promise<void> {
   return invoke("open_document_link", { url });
 }

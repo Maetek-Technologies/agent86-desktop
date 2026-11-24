@@ -5,8 +5,13 @@
 //! must then lie inside the thread's workspace or a worktree one of its sub-agents kept. Opening
 //! hands the file to its default app, which for a program or script would run it, so those can
 //! only be revealed.
+//!
+//! Viewers read text files through the same `resolve` (`read_text`): UTF-8 only, with a size cap.
 
+use serde::Serialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use ts_rs::TS;
 
 /// Extensions whose default "open" runs something (programs, scripts, shortcuts, installers).
 const RUNS_WHEN_OPENED: &[&str] = &[
@@ -133,6 +138,55 @@ pub fn shown(path: PathBuf) -> PathBuf {
     crate::commands::strip_verbatim(path)
 }
 
+/// The most a viewer reads of one file. Markdown past this is not a document anyone reads in a
+/// pane, and the whole text crosses IPC as one string.
+pub const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
+
+/// A text file read for a viewer (the Markdown viewer, docs/PROJECT_PLAN.md §7a).
+#[derive(Debug, Serialize, PartialEq, Eq, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct TextFile {
+    /// Absolute, canonical, as the OS shows it: relative links in the file are taken from its
+    /// folder.
+    pub path: String,
+    /// The whole file, UTF-8, without a byte-order mark.
+    pub text: String,
+}
+
+/// Read `path` (already through `resolve`) as UTF-8 text of at most `max` bytes.
+pub fn read_text(path: &Path, max: u64) -> Result<TextFile, String> {
+    let name = shown(path.to_owned()).display().to_string();
+    let metadata = std::fs::metadata(path).map_err(|error| format!("{name}: {error}"))?;
+    if !metadata.is_file() {
+        return Err(format!("{name} is not a file."));
+    }
+    let too_big = || {
+        let limit = if max >= 1024 * 1024 {
+            format!("{} MB", max / (1024 * 1024))
+        } else {
+            format!("{max} bytes")
+        };
+        format!("{name} is larger than {limit}, so the app will not show it.")
+    };
+    if metadata.len() > max {
+        return Err(too_big());
+    }
+    // The file can grow between the check and the read: never take more than `max`.
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    std::fs::File::open(path)
+        .and_then(|file| file.take(max + 1).read_to_end(&mut bytes))
+        .map_err(|error| format!("{name}: {error}"))?;
+    if bytes.len() as u64 > max {
+        return Err(too_big());
+    }
+    let mut text = String::from_utf8(bytes).map_err(|_| format!("{name} is not UTF-8 text."))?;
+    if text.starts_with('\u{feff}') {
+        text.drain(..'\u{feff}'.len_utf8());
+    }
+    Ok(TextFile { path: name, text })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +251,48 @@ mod tests {
             assert!(!runs_when_opened(&path), "{name}");
         }
         assert!(!runs_when_opened(dir.path()));
+    }
+
+    #[test]
+    fn a_text_file_inside_the_workspace_is_read_without_its_bom() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/plan.md"), "\u{feff}# Plan\n\nü\n").unwrap();
+        let path = resolve("docs/plan.md", &roots(dir.path())).unwrap();
+        let file = read_text(&path, MAX_TEXT_BYTES).unwrap();
+        assert_eq!(file.text, "# Plan\n\nü\n");
+        assert_eq!(file.path, shown(path).display().to_string());
+        assert!(Path::new(&file.path).is_absolute());
+    }
+
+    #[test]
+    fn folders_large_files_and_non_utf8_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = read_text(dir.path(), MAX_TEXT_BYTES).unwrap_err();
+        assert!(error.contains("not a file"), "{error}");
+
+        let big = dir.path().join("big.md");
+        std::fs::write(&big, vec![b'a'; 11]).unwrap();
+        assert!(read_text(&big, 11).is_ok());
+        let error = read_text(&big, 10).unwrap_err();
+        assert!(error.contains("larger than"), "{error}");
+
+        let binary = dir.path().join("image.md");
+        std::fs::write(&binary, [0x89, b'P', b'N', b'G', 0xff, 0xfe]).unwrap();
+        let error = read_text(&binary, MAX_TEXT_BYTES).unwrap_err();
+        assert!(error.contains("not UTF-8"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_workspace_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("secret.md"), "x").unwrap();
+        std::os::unix::fs::symlink(other.path().join("secret.md"), dir.path().join("notes.md"))
+            .unwrap();
+        // `read_text` is only ever reached through `resolve`, which refuses the link.
+        let error = resolve("notes.md", &roots(dir.path())).unwrap_err();
+        assert!(error.contains("outside"), "{error}");
     }
 }

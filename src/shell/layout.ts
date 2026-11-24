@@ -1,5 +1,6 @@
-// The sessions panel's width and whether it is shown, kept in the WebView's localStorage between
-// runs (agent86-web's scheme). Storage can be unavailable; the panel then just uses the defaults.
+// The sessions panel's width and whether it is shown, and the document pane's width, kept in the
+// WebView's localStorage between runs (agent86-web's scheme). Storage can be unavailable; the
+// panels then just use the defaults.
 
 const KEY = "agent86.sidebar.v1";
 
@@ -38,6 +39,40 @@ export function loadSidebar(): SidebarLayout {
 export function saveSidebar(layout: SidebarLayout): void {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(layout));
+  } catch {
+    // Kept for this run only.
+  }
+}
+
+const DOCUMENT_KEY = "agent86.document-pane.v1";
+
+/** The Markdown viewer's pane beside the transcript (pixels; CSS also caps it at 70%). */
+export const DOCUMENT_DEFAULT = 480;
+export const DOCUMENT_MIN = 300;
+export const DOCUMENT_MAX = 960;
+
+export function clampDocumentPane(width: number): number {
+  if (!Number.isFinite(width)) return DOCUMENT_DEFAULT;
+  return Math.round(Math.min(DOCUMENT_MAX, Math.max(DOCUMENT_MIN, width)));
+}
+
+/** The document pane's width last saved, or the default. */
+export function loadDocumentPane(): number {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(DOCUMENT_KEY) ?? "null");
+    if (parsed && typeof parsed === "object" && "width" in parsed) {
+      const { width } = parsed as { width: unknown };
+      if (typeof width === "number") return clampDocumentPane(width);
+    }
+  } catch {
+    // Unreadable or unavailable: the default.
+  }
+  return DOCUMENT_DEFAULT;
+}
+
+export function saveDocumentPane(width: number): void {
+  try {
+    window.localStorage.setItem(DOCUMENT_KEY, JSON.stringify({ width }));
   } catch {
     // Kept for this run only.
   }

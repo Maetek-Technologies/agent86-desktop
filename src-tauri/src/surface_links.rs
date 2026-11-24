@@ -3,7 +3,7 @@
 //! `http` or `https`, since a URL from a binding or a function is known only once the renderer
 //! resolves it, after agent86 checked the surface.
 //!
-//! Links in a chat reply (and, later, in a Markdown document the viewer shows) go through
+//! Links in a chat reply or in a Markdown document the viewer shows go through
 //! `checked_document_link`: the same rules, plus `mailto:`.
 
 use tauri::Url;

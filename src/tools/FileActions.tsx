@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { openPath } from "../desktop-client/backend.ts";
+import { isMarkdown } from "../markdown/links.ts";
 import { useThread } from "../thread/ThreadContext.ts";
 
 /** What the platform's file manager is called. */
@@ -13,10 +14,10 @@ function fileManager(): string {
 /**
  * "open" and "reveal" for a file or folder a tool worked on. Rust decides what is allowed: only
  * paths inside the thread's workspace or a worktree its sub-agents kept, and programs and
- * scripts are only revealed.
+ * scripts are only revealed. A Markdown file also offers "view", in the thread's document pane.
  */
 export function FileActions({ path, open = true }: { path: string; open?: boolean }) {
-  const { threadId } = useThread();
+  const { threadId, openFile } = useThread();
   const [problem, setProblem] = useState<string | null>(null);
   if (!threadId) return null;
   const run = (reveal: boolean) => (event: React.MouseEvent) => {
@@ -27,6 +28,19 @@ export function FileActions({ path, open = true }: { path: string; open?: boolea
   const button = "rounded px-1 text-muted hover:bg-panel-2 hover:text-text";
   return (
     <>
+      {openFile && isMarkdown(path) && (
+        <button
+          type="button"
+          className={button}
+          title="Show it rendered, beside the conversation"
+          onClick={(event) => {
+            event.stopPropagation();
+            openFile(path);
+          }}
+        >
+          view
+        </button>
+      )}
       {open && (
         <button
           type="button"

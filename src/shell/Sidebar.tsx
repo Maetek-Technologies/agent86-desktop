@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { SessionList, SessionSummary, UpdateInfo } from "../desktop-client/events.ts";
 import { modLabel } from "./shortcuts.ts";
-import { clampSidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from "./layout.ts";
+import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from "./layout.ts";
+import { ResizeHandle } from "./ResizeHandle.tsx";
 import { folderName } from "./tabs.ts";
 import { RenameInput } from "./Tabs.tsx";
 
@@ -202,48 +203,17 @@ export function Sidebar({
           ⚙ Settings
         </button>
       </div>
-      {onResize && <ResizeHandle width={width} onResize={onResize} />}
+      {onResize && (
+        <ResizeHandle
+          width={width}
+          onResize={onResize}
+          label="Resize sessions panel"
+          min={SIDEBAR_MIN}
+          max={SIDEBAR_MAX}
+          reset={SIDEBAR_DEFAULT}
+          edge="right"
+        />
+      )}
     </aside>
-  );
-}
-
-/** The panel's right edge: drag, arrow keys (Shift for bigger steps), or double-click to reset. */
-function ResizeHandle({ width, onResize }: { width: number; onResize: (width: number) => void }) {
-  const drag = useRef<{ x: number; width: number } | undefined>(undefined);
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize sessions panel"
-      aria-valuenow={width}
-      aria-valuemin={SIDEBAR_MIN}
-      aria-valuemax={SIDEBAR_MAX}
-      tabIndex={0}
-      title="Drag to resize, double-click to reset"
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        drag.current = { x: event.clientX, width };
-      }}
-      onPointerMove={(event) => {
-        if (!drag.current) return;
-        onResize(clampSidebar(drag.current.width + event.clientX - drag.current.x));
-      }}
-      onPointerUp={(event) => {
-        drag.current = undefined;
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-      onDoubleClick={() => onResize(SIDEBAR_DEFAULT)}
-      onKeyDown={(event) => {
-        const step = event.shiftKey ? 48 : 16;
-        if (event.key === "ArrowLeft") onResize(clampSidebar(width - step));
-        else if (event.key === "ArrowRight") onResize(clampSidebar(width + step));
-        else if (event.key === "Home") onResize(SIDEBAR_MIN);
-        else if (event.key === "End") onResize(SIDEBAR_MAX);
-        else return;
-        event.preventDefault();
-      }}
-      className="absolute top-0 -right-0.5 z-10 h-full w-1.5 cursor-col-resize hover:bg-accent/50 focus-visible:bg-accent/70 focus-visible:outline-none"
-    />
   );
 }

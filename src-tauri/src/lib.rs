@@ -145,6 +145,7 @@ pub fn run() {
             commands::list_models,
             commands::notify,
             commands::open_path,
+            commands::read_text_file,
             commands::open_document_link,
             commands::check_update,
             commands::install_update,

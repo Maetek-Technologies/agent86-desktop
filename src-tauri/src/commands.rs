@@ -842,9 +842,10 @@ pub async fn open_path(
     .map_err(|error| error.to_string())?
 }
 
-/// Open a link from Markdown the model wrote (a chat reply): http, https, or mailto
-/// (`surface_links::checked_document_link`), with the system's browser or mail app. The webview
-/// has no opener permission of its own (capabilities/default.json), so this is the only way out.
+/// Open a link from Markdown the model wrote (a chat reply, or a document in the Markdown viewer):
+/// http, https, or mailto (`surface_links::checked_document_link`), with the system's browser or
+/// mail app. The webview has no opener permission of its own (capabilities/default.json), so this
+/// is the only way out.
 #[tauri::command]
 pub fn open_document_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -857,6 +858,26 @@ pub fn open_document_link(app: tauri::AppHandle, url: String) -> Result<(), Stri
     app.opener()
         .open_url(url.as_str(), None::<&str>)
         .map_err(|error| error.to_string())
+}
+
+/// Read `path` as UTF-8 text for a viewer (the Markdown viewer). The same rule as `open_path`:
+/// only files inside thread `thread_id`'s workspace or a worktree its sub-agents kept; at most
+/// `file_actions::MAX_TEXT_BYTES`.
+#[tauri::command]
+pub async fn read_text_file(
+    threads: State<'_, ThreadManager>,
+    thread_id: String,
+    path: String,
+) -> Result<file_actions::TextFile, String> {
+    let roots = threads.file_roots(&thread_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = file_actions::resolve(&path, &roots).inspect_err(|error| {
+            log::warn!("Read refused: {error}");
+        })?;
+        file_actions::read_text(&resolved, file_actions::MAX_TEXT_BYTES)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Look for a newer version on GitHub Releases. `None` when this one is the latest.
