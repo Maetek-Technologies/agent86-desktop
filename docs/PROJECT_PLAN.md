@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.2).
 
-Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed.
+Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest: v1.1.2. Next: v1.2.0, a Markdown viewer (§7a), then the reordered queue in §7a.
 
 ---
 
@@ -208,6 +208,10 @@ The SDK discovers nothing, so the app decides what to share with the CLI.
   not over the app. Media loads only from `data:` URLs and the `agent86-media` scheme, which the
   CSP (`img-src`, `media-src`) allows alongside `'self'`; `asset:` is gone. A link opens only
   after the user saw the URL, and Rust opens only http and https.
+- **Markdown viewer (1.2.0):** files are read only through `read_text_file`, under the same
+  workspace and worktree rules as `open_path`. mdglass runs with raw HTML off, its output passes
+  DOMPurify, images are never loaded (shown as links), and only http, https, and mailto links
+  leave the app. Math and Mermaid stay off until their inline styles are settled with the CSP.
 - **Release builds:** signed (Windows Authenticode, Apple notarization), updater signatures, and
   dependency auditing in CI (`cargo deny` with `src-tauri/deny.toml`, `pnpm audit`).
 
@@ -357,6 +361,44 @@ redraw it; `render_ui` refuses the prefix.
   beside a message's kind inside it; broken tool-call JSON gets a longer error and is replayed as
   `{}`; `Tool::retry_hint` is a provided method. `TurnEvent` and agent86-ui's runtime (which
   `runtime/` ports) are unchanged, and `unstable.rs` builds as it was.
+
+---
+
+## 7a. Next releases
+
+**1.2.0 (next): Markdown viewer.** Markdown the agent writes to files is shown today only as raw
+source (the `new-file` detail on a tool card) or handed to another app with **open**. 1.2.0 adds a
+viewer pane, rendered with [`mdglass`](https://www.npmjs.com/package/mdglass) (markdown-it, GFM
+extras, highlight.js, front matter, heading list, `file:line` references). Chat replies keep
+`src/markdown/Markdown.tsx` (react-markdown, block-memoized for streaming); mdglass is used only in
+the viewer.
+
+| Step | Work | Done when |
+| ---- | ---- | --------- |
+| 1 | `read_text_file(thread_id, path)` in `commands.rs` | Resolves through `file_roots()` and `file_actions::resolve` like `open_path` (workspace or a kept worktree only); UTF-8 only; 2 MB cap; typed result through ts-rs; Rust tests for refused paths, symlinks out of the workspace, oversized and non-UTF-8 files |
+| 2 | `src/markdown/MarkdownViewer.tsx` | One mdglass renderer (`createRenderer` with front matter, GFM, highlight; **math and Mermaid off**), output set as `innerHTML` after a DOMPurify `sanitize` pass; Rendered / Raw toggle (Raw through `Highlight`); a contents list from `result.headings`; front matter as a folded table |
+| 3 | Safety plugins and link handling | An mdglass plugin replaces markdown-it's image rule so images are never loaded and show as `[image: alt]` links, as in chat (SECURITY T10); one click handler: http, https, and mailto through `safeUrl`, opened outside the app; relative `.md` links load in the viewer through `read_text_file`; `path:line` references go to open / reveal; anything else is text |
+| 4 | Pane in `ThreadView` | A resizable pane beside the transcript (per thread, not a tab, so `Tab` and the tabs reducer are untouched), closed with Esc or ✕; width kept in localStorage like the sessions panel |
+| 5 | Entry points | **view** on tool cards for `.md` / `.markdown` paths (new files and edits); **View as document** on a finished assistant reply, which renders its text without a file read |
+| 6 | Look | `mdglass/styles.css` mapped onto the app's CSS variables, so light and dark follow `theme.ts`; a highlight.js theme matching the lowlight colours; no inline styles, so the release CSP (`style-src 'self'`) needs no change |
+| 7 | Tests and docs | Vitest: the sanitizer (`<script>`, `on*` attributes, `javascript:` links, images), link routing, the toggle; USER_GUIDE section; security notes; `docs/releases/v1.2.0.md` |
+
+Dependencies: `mdglass` pinned at an exact version (0.1.0 or later), `dompurify` pinned; both pass
+`pnpm audit --prod`. Not in 1.2.0: math, Mermaid, local images, editing, live reload of a changed
+file.
+
+**After 1.2.0, in this order.** Collected from the notes above (not-yet-done and not-verified
+items) and §8; each is a release of its own unless small enough to ride along.
+
+| Order | Item | Why here |
+| ----- | ---- | -------- |
+| 1 | **End-to-end tests** (§8): Playwright against the Vite build with `@tauri-apps/api/mocks` on every PR, then a small `tauri-driver` suite with the mock provider on Windows and Linux | Planned in §8 and not built; 1.2.0 adds the first `innerHTML` rendering, and every later item is safer with UI coverage |
+| 2 | **Release verification**: a real install-and-update cycle on all three OSes; notification clicks on Windows; macOS and Linux checks beyond CI (M7, M8 gaps) | Needed before signing makes installs look trusted |
+| 3 | **Code signing**: Authenticode and Apple Developer ID with notarization (wired in `release.yml`, secrets missing) | Removes the SmartScreen and Gatekeeper steps from the user guide; waits on certificates |
+| 4 | **Math and Mermaid in the viewer** | Needs a CSP decision: KaTeX sets inline `style=` and Mermaid adds `<style>` to its SVGs, both blocked in release builds. Try KaTeX's MathML output first; loosen `style-src-attr` only by an explicit decision; load Mermaid lazily (several MB) |
+| 5 | **agent86UI remote media setting**, once agent86's `[ui] agent86ui_remote_media` is in an agent86-core release we pin | Off today with no setting (1.1.0) |
+| 6 | **Upstream asks**: promote `Memory::store`, `build_embedder`, the keyring, and the catalogue out of `unstable.rs` into `sdk`; fix `/agent` (`Turn::specialist`) ignoring `isolation: worktree` | Lets the `=` pin on agent86-core relax (§9); depends on agent86's schedule |
+| 7 | **Shared UI package with agent86-web** (D1) | Only if drift starts to cost; the Markdown viewer is a candidate to share |
 
 ## 8. Testing
 
