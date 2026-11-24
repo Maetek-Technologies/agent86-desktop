@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   answer,
   appInfo,
@@ -86,8 +94,11 @@ export function App() {
   );
   const [opening, setOpening] = useState(false);
   const [state, dispatchTabs] = useReducer(tabsReduce, NO_TABS);
+  // Read by callbacks (reopen, close, notifications, shortcuts). Kept current in a layout effect,
+  // during the commit: a passive effect can run after the new tab is already on screen, and a
+  // click in between (a saved session clicked again) would not see it and open the session twice.
   const stateRef = useRef(state);
-  useEffect(() => {
+  useLayoutEffect(() => {
     stateRef.current = state;
   }, [state]);
   /** When each tab's running turn started, for "a long turn finished" notifications. */
