@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.2).
 
-Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest: v1.1.2. Next: v1.2.0, a Markdown viewer (§7a), then the reordered queue in §7a.
+Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.1.3. The version is now 1.2.0 (the Markdown viewer, §7a), ready to tag; after it, the reordered queue in §7a.
 
 ---
 
@@ -366,7 +366,7 @@ redraw it; `render_ui` refuses the prefix.
 
 ## 7a. Next releases
 
-**1.2.0 (next): Markdown viewer.** Built (steps 1–7 below); released with the version bump. Markdown the agent writes to files is shown today only as raw
+**1.2.0: Markdown viewer.** Built (steps 1–7 below, PR #6); the version is set to 1.2.0, ready to tag. Markdown the agent writes to files is shown today only as raw
 source (the `new-file` detail on a tool card) or handed to another app with **open**. 1.2.0 adds a
 viewer pane, rendered with [`mdglass`](https://www.npmjs.com/package/mdglass) (markdown-it, GFM
 extras, highlight.js, front matter, heading list, `file:line` references). Chat replies keep
