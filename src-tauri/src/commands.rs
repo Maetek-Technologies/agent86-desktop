@@ -842,6 +842,23 @@ pub async fn open_path(
     .map_err(|error| error.to_string())?
 }
 
+/// Open a link from Markdown the model wrote (a chat reply): http, https, or mailto
+/// (`surface_links::checked_document_link`), with the system's browser or mail app. The webview
+/// has no opener permission of its own (capabilities/default.json), so this is the only way out.
+#[tauri::command]
+pub fn open_document_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let url = crate::surface_links::checked_document_link(&url)?;
+    log::info!(
+        "Opening a document link ({}) to {}",
+        url.scheme(),
+        url.host_str().unwrap_or_default()
+    );
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 /// Look for a newer version on GitHub Releases. `None` when this one is the latest.
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {

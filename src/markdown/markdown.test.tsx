@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openDocumentLink } from "../desktop-client/backend.ts";
 import { Markdown } from "./Markdown.tsx";
 
-afterEach(cleanup);
+vi.mock("../desktop-client/backend.ts", () => ({
+  openDocumentLink: vi.fn(() => Promise.resolve()),
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.mocked(openDocumentLink).mockClear();
+});
 
 describe("Markdown (docs/SECURITY.md T10)", () => {
   it("renders GFM: headings, lists, tables, task lists, and code", () => {
@@ -52,6 +60,18 @@ describe("Markdown (docs/SECURITY.md T10)", () => {
     expect(link.getAttribute("href")).toBe("https://example.com");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+  });
+
+  it.each([
+    ["[site](https://example.com/a?b=1)", "https://example.com/a?b=1"],
+    ["[mail](mailto:a@example.com)", "mailto:a@example.com"],
+    ["![pixel](https://example.com/p.png)", "https://example.com/p.png"],
+  ])("opens %s through the app, not the webview", (text, url) => {
+    const { container } = render(<Markdown text={text} />);
+    const link = container.querySelector("a")!;
+    // fireEvent returns false when the default (the webview following the link) was prevented.
+    expect(fireEvent.click(link)).toBe(false);
+    expect(openDocumentLink).toHaveBeenCalledExactlyOnceWith(url);
   });
 
   it("never loads images: they become links", () => {
