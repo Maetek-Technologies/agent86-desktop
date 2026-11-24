@@ -166,8 +166,23 @@ body {
   margin-right: 0.4rem;
 }
 
-/* The Markdown viewer's links (src/markdown/viewer-engine.ts): HTML from mdglass, so no React
-   classes; styled as chat links are. Links that lead nowhere stay plain text. */
+/* The Markdown viewer (src/markdown/viewer-engine.ts): mdglass's HTML inside .md, so no React
+   classes. mdglass's own colours (mdglass/styles.css, loaded with the viewer) are set to the app's
+   tokens here, on the element, so they follow the theme and win over mdglass's :root defaults.
+   No inline styles anywhere: the release CSP has style-src 'self'. */
+.md-document {
+  --mdg-border: var(--border);
+  --mdg-muted: var(--muted);
+  --mdg-subtle-bg: var(--panel-2);
+  --mdg-note: var(--hl-title);
+  --mdg-tip: var(--ok);
+  --mdg-important: var(--hl-keyword);
+  --mdg-warning: var(--warn);
+  --mdg-caution: var(--error);
+  --mdg-error: var(--error);
+}
+
+/* Links, as chat links are; those that lead nowhere stay plain text. */
 .md-document a[data-link]:not([data-link="none"]),
 .md-document sup.footnote-ref a,
 .md-document a.footnote-backref {
@@ -175,8 +190,57 @@ body {
   text-decoration: underline;
   cursor: pointer;
 }
+.md-document a.file-ref {
+  /* mdglass marks file references with a dotted line instead of an underline. */
+  text-decoration: none;
+}
 .md-document a[data-link="none"] {
   cursor: default;
+}
+
+/* Code: boxed like chat's code blocks, inline code like chat's. */
+.md-document pre {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--panel-2);
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.md-document :not(pre) > code {
+  border-radius: 0.25rem;
+  background: var(--panel-2);
+  padding: 0.1rem 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* Wide tables scroll inside the pane instead of widening it. */
+.md-document table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.md-document th,
+.md-document td {
+  /* .md breaks words anywhere; in a cell that squeezes the table instead of scrolling it. */
+  overflow-wrap: normal;
+}
+.md-document .front-matter table {
+  display: table;
+}
+.md-document .front-matter th,
+.md-document .front-matter td {
+  border: none;
+  background: none;
+}
+
+.md-document .footnotes {
+  font-size: 0.875em;
+  color: var(--muted);
 }
 
 /* Syntax highlighting (lowlight / highlight.js classes). */
