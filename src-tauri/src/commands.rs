@@ -842,6 +842,22 @@ pub async fn open_path(
     .map_err(|error| error.to_string())?
 }
 
+/// Open a link from a Markdown document in the viewer: http, https, or mailto
+/// (`surface_links::checked_document_link`), with the system's browser or mail app.
+#[tauri::command]
+pub fn open_document_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let url = crate::surface_links::checked_document_link(&url)?;
+    log::info!(
+        "Opening a document link ({}) to {}",
+        url.scheme(),
+        url.host_str().unwrap_or_default()
+    );
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 /// Read `path` as UTF-8 text for a viewer (the Markdown viewer). The same rule as `open_path`:
 /// only files inside thread `thread_id`'s workspace or a worktree its sub-agents kept; at most
 /// `file_actions::MAX_TEXT_BYTES`.

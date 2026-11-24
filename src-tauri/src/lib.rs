@@ -139,6 +139,7 @@ pub fn run() {
             commands::notify,
             commands::open_path,
             commands::read_text_file,
+            commands::open_document_link,
             commands::check_update,
             commands::install_update,
             commands::restart_app,

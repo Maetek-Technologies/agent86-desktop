@@ -194,6 +194,11 @@ export function readTextFile(threadId: string, path: string): Promise<TextFile> 
   return invoke<TextFile>("read_text_file", { threadId, path });
 }
 
+/** Open an http, https, or mailto link from a document in the Markdown viewer. Rust checks it. */
+export function openDocumentLink(url: string): Promise<void> {
+  return invoke("open_document_link", { url });
+}
+
 /** Ask GitHub Releases for a newer version; `null` when this is the latest. */
 export function checkUpdate(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_update");

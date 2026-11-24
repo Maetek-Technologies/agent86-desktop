@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Highlight } from "../highlight/Highlight.tsx";
+import { targetOf, type LinkTarget } from "./links.ts";
 
 type Engine = typeof import("./viewer-engine.ts");
 
@@ -26,11 +27,23 @@ function fileName(path: string): string {
  * A Markdown document, rendered with mdglass (GFM, highlighting, front matter) or shown as its
  * source. Used for files the agent wrote and for replies opened as documents. The HTML is cleaned
  * by viewer-engine.ts before it reaches the page.
+ *
+ * Links never navigate the webview: a click on one is caught here. `#id` links scroll within the
+ * document; every other target goes to `onLink` (follow.ts), and what it throws is shown.
  */
-export function MarkdownViewer({ text, title }: { text: string; title?: string }) {
+export function MarkdownViewer({
+  text,
+  title,
+  onLink,
+}: {
+  text: string;
+  title?: string;
+  onLink?: (target: LinkTarget) => void | Promise<void>;
+}) {
   const [mode, setMode] = useState<Mode>("rendered");
   const [ready, setReady] = useState(!!engine);
   const [problem, setProblem] = useState<string | null>(null);
+  const [linkProblem, setLinkProblem] = useState<string | null>(null);
   const body = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,8 +65,25 @@ export function MarkdownViewer({ text, title }: { text: string; title?: string }
   const headings = rendered?.headings.filter((h) => h.id) ?? [];
 
   const goTo = (id: string) => {
-    const target = body.current?.querySelector(`#${CSS.escape(engine!.ID_PREFIX + id)}`);
-    target?.scrollIntoView({ block: "start" });
+    // Ids in the document carry the prefix; a link may name one with or without it.
+    const find = (name: string) => body.current?.querySelector(`#${CSS.escape(name)}`);
+    (find(engine!.ID_PREFIX + id) ?? find(id))?.scrollIntoView({ block: "start" });
+  };
+
+  const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const link = (event.target as Element).closest("a");
+    if (!link || !event.currentTarget.contains(link)) return;
+    event.preventDefault();
+    setLinkProblem(null);
+    const target = targetOf(link);
+    if (target.kind === "anchor") return goTo(target.id);
+    if (target.kind === "none" || !onLink) return;
+    const show = (error: unknown) => setLinkProblem(String(error));
+    try {
+      void Promise.resolve(onLink(target)).catch(show);
+    } catch (error) {
+      show(error);
+    }
   };
 
   const tab = (which: Mode, label: string) => (
@@ -118,8 +148,14 @@ export function MarkdownViewer({ text, title }: { text: string; title?: string }
                 </nav>
               </details>
             )}
+            {linkProblem && (
+              <p role="alert" className="mb-3 text-sm text-error">
+                {linkProblem}
+              </p>
+            )}
             <div
               ref={body}
+              onClick={onClick}
               className="md md-document"
               // Cleaned by viewer-engine.ts (mdglass without raw HTML, then DOMPurify).
               dangerouslySetInnerHTML={{ __html: rendered.html }}
