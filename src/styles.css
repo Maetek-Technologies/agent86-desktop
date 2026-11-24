@@ -166,6 +166,19 @@ body {
   margin-right: 0.4rem;
 }
 
+/* The Markdown viewer's links (src/markdown/viewer-engine.ts): HTML from mdglass, so no React
+   classes; styled as chat links are. Links that lead nowhere stay plain text. */
+.md-document a[data-link]:not([data-link="none"]),
+.md-document sup.footnote-ref a,
+.md-document a.footnote-backref {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.md-document a[data-link="none"] {
+  cursor: default;
+}
+
 /* Syntax highlighting (lowlight / highlight.js classes). */
 .hljs-comment,
 .hljs-quote {

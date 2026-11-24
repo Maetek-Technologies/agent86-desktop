@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Highlight } from "../highlight/Highlight.tsx";
 import { targetOf, type LinkTarget } from "./links.ts";
 
@@ -35,10 +35,16 @@ export function MarkdownViewer({
   text,
   title,
   onLink,
+  leading,
+  actions,
 }: {
   text: string;
   title?: string;
   onLink?: (target: LinkTarget) => void | Promise<void>;
+  /** Controls before the title (the pane's ← back). */
+  leading?: ReactNode;
+  /** Controls at the end of the header (the pane's ✕). */
+  actions?: ReactNode;
 }) {
   const [mode, setMode] = useState<Mode>("rendered");
   const [ready, setReady] = useState(!!engine);
@@ -103,6 +109,7 @@ export function MarkdownViewer({
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label={title ?? "Markdown document"}>
       <header className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-sm">
+        {leading}
         {title && (
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={title}>
             {fileName(title)}
@@ -112,6 +119,7 @@ export function MarkdownViewer({
           {tab("rendered", "Rendered")}
           {tab("raw", "Raw")}
         </div>
+        {actions}
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
         {mode === "raw" ? (

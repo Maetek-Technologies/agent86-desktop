@@ -10,7 +10,9 @@ import type {
   SessionState,
   ToolEntry,
 } from "../desktop-client/session-state.ts";
+import { DocumentPane } from "../markdown/DocumentPane.tsx";
 import { Markdown } from "../markdown/Markdown.tsx";
+import { useDocuments } from "../markdown/useDocuments.ts";
 import { SecretPrompt } from "../secrets/SecretPrompt.tsx";
 import { SecretsPanel } from "../secrets/SecretsPanel.tsx";
 import { TrustBanner, TrustDialog } from "../trust/TrustDialog.tsx";
@@ -67,6 +69,13 @@ export function ThreadView({
   onApproval,
 }: Props) {
   const [reviewing, setReviewing] = useState(false);
+  // The document pane beside the transcript (the Markdown viewer).
+  const documents = useDocuments(thread.threadId);
+  const { openFile, openDocument } = documents;
+  const threadInfo = useMemo(
+    () => ({ cwd: thread.workspace, threadId: thread.threadId, openFile, openDocument }),
+    [thread.workspace, thread.threadId, openFile, openDocument],
+  );
   const bottom = useRef<HTMLDivElement>(null);
   const last = state.entries.at(-1);
   const lastLength = last && "text" in last ? last.text.length : 0;
@@ -96,7 +105,7 @@ export function ThreadView({
   }, [state.entries.length, lastLength, question]);
 
   return (
-    <ThreadContext.Provider value={{ cwd: thread.workspace, threadId: thread.threadId }}>
+    <ThreadContext.Provider value={threadInfo}>
       <div className="relative flex h-full flex-col bg-bg text-text">
         <header className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2 text-sm">
           <span className="min-w-0 flex-1 truncate font-mono" title={thread.workspace}>
@@ -183,6 +192,7 @@ export function ThreadView({
               <div ref={bottom} />
             </div>
           </main>
+          <DocumentPane threadId={thread.threadId} documents={documents} />
           {secretsOpen && (
             <div className="w-80 shrink-0 border-l border-border">
               <SecretsPanel threadId={thread.threadId} onClose={() => onSecrets(false)} />
