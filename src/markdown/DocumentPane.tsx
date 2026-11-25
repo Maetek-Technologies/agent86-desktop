@@ -16,8 +16,8 @@ const button = "rounded px-1.5 text-muted hover:bg-panel-2 hover:text-text";
 
 /**
  * The Markdown viewer beside a thread's transcript (docs/PROJECT_PLAN.md §7a, step 4). Resizable
- * from its left edge (the width is kept between runs), closed with ✕ or Esc, and with ← back to
- * the document a link was followed from.
+ * from its left edge (the width is kept between runs), closed with ✕ or Esc, with ← back to the
+ * document a link was followed from, and ↻ to read a file again (the agent may still be writing it).
  */
 export function DocumentPane({ threadId, documents }: { threadId: string; documents: Documents }) {
   return documents.current ? (
@@ -35,8 +35,9 @@ function OpenPane({
   documents: Documents;
   current: OpenDocument;
 }) {
-  const { canGoBack, back, close, push } = documents;
+  const { canGoBack, back, close, push, refresh } = documents;
   const [width, setWidth] = useState(loadDocumentPane);
+  const [refreshing, setRefreshing] = useState(false);
   const pane = useRef<HTMLElement>(null);
 
   // Give the focus back where it was when the pane opened, once it closes. Declared before the
@@ -56,16 +57,35 @@ function OpenPane({
       ←
     </button>
   ) : null;
+  // A reply shown as a document has no file to read again.
+  const canRefresh = !!current.path && current.status !== "loading";
   const actions = (
-    <button
-      type="button"
-      className={button}
-      onClick={close}
-      title="Close (Esc)"
-      aria-label="Close document"
-    >
-      ✕
-    </button>
+    <>
+      {current.path && (
+        <button
+          type="button"
+          className={`${button} disabled:opacity-50`}
+          disabled={!canRefresh || refreshing}
+          onClick={() => {
+            setRefreshing(true);
+            void refresh().finally(() => setRefreshing(false));
+          }}
+          title="Read the file again"
+          aria-label="Refresh document"
+        >
+          {refreshing ? "…" : "↻"}
+        </button>
+      )}
+      <button
+        type="button"
+        className={button}
+        onClick={close}
+        title="Close (Esc)"
+        aria-label="Close document"
+      >
+        ✕
+      </button>
+    </>
   );
 
   return (

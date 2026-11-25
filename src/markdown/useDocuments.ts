@@ -11,6 +11,11 @@ export interface Documents {
   openDocument: (title: string, text: string) => void;
   /** Read a file of the thread's and show it, starting a new stack. */
   openFile: (path: string) => void;
+  /**
+   * Read the shown file again, in place (a document the agent is still writing). Resolves once
+   * it is read, or failed; nothing to do for a reply or a file still loading.
+   */
+  refresh: () => Promise<void>;
   /** Show a file a link led to, above the current document. */
   push: (file: TextFile) => void;
   back: () => void;
@@ -46,6 +51,24 @@ export function useDocuments(threadId: string): Documents {
     [threadId],
   );
 
+  const current = state.stack.at(-1);
+  const refresh = useCallback(async () => {
+    if (!current?.path || current.status === "loading") return;
+    const { id, path, title } = current;
+    try {
+      const file = await readTextFile(threadId, path);
+      dispatch({
+        type: "replace",
+        doc: { id, title: file.path, path: file.path, status: "ready", text: file.text },
+      });
+    } catch (error: unknown) {
+      dispatch({
+        type: "replace",
+        doc: { id, title, path, status: "failed", problem: String(error) },
+      });
+    }
+  }, [threadId, current]);
+
   const push = useCallback((file: TextFile) => {
     dispatch({
       type: "push",
@@ -64,14 +87,15 @@ export function useDocuments(threadId: string): Documents {
 
   return useMemo(
     () => ({
-      current: state.stack.at(-1),
+      current,
       canGoBack: state.stack.length > 1,
       openDocument,
       openFile,
+      refresh,
       push,
       back,
       close,
     }),
-    [state, openDocument, openFile, push, back, close],
+    [current, state.stack.length, openDocument, openFile, refresh, push, back, close],
   );
 }

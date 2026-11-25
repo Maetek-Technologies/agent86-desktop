@@ -12,7 +12,8 @@ vi.mock("../desktop-client/backend.ts", () => ({
   readTextFile: vi.fn(),
 }));
 
-const FILES: Record<string, string> = {
+let FILES: Record<string, string> = {};
+const START: Record<string, string> = {
   "/ws/docs/plan.md": "# Plan\n\nSee [the steps](steps.md) and src/app.ts:4.",
   "/ws/docs/steps.md": "# Steps\n\n1. Do it.",
 };
@@ -39,6 +40,7 @@ beforeAll(() => import("./viewer-engine.ts"), 30_000);
 
 beforeEach(() => {
   window.localStorage.clear();
+  FILES = { ...START };
   vi.mocked(readTextFile).mockImplementation((_thread, path) =>
     path in FILES
       ? Promise.resolve({ path, text: FILES[path]! })
@@ -120,5 +122,33 @@ describe("DocumentPane", () => {
     expect(
       screen.getByRole("separator", { name: "Resize document pane" }).getAttribute("aria-valuenow"),
     ).toBe("960");
+  });
+
+  it("reads a file again in place with ↻, keeping Raw, and retries one that failed", async () => {
+    render(<Harness />);
+    act(() => docs().openFile("/ws/docs/plan.md"));
+    await screen.findByRole("heading", { name: "Plan" });
+    fireEvent.click(screen.getByRole("tab", { name: "Raw" }));
+
+    // The agent goes on writing it.
+    FILES["/ws/docs/plan.md"] = "# Plan\n\n## Step two";
+    fireEvent.click(screen.getByRole("button", { name: "Refresh document" }));
+    expect(await screen.findByText(/Step two/)).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Raw" }).getAttribute("aria-selected")).toBe("true");
+    expect(readTextFile).toHaveBeenLastCalledWith("t1", "/ws/docs/plan.md");
+
+    // Not written yet when first opened: ↻ tries again.
+    act(() => docs().openFile("/ws/docs/new.md"));
+    expect((await screen.findByRole("alert")).textContent).toContain("No such file");
+    FILES["/ws/docs/new.md"] = "# New";
+    fireEvent.click(screen.getByRole("button", { name: "Refresh document" }));
+    expect(await screen.findByRole("heading", { name: "New" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("has no ↻ for a reply shown as a document", () => {
+    render(<Harness />);
+    act(() => docs().openDocument("Reply", "# One"));
+    expect(screen.queryByRole("button", { name: "Refresh document" })).toBeNull();
   });
 });

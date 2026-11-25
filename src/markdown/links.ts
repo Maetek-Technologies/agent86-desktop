@@ -27,6 +27,19 @@ function decode(text: string): string {
   }
 }
 
+/**
+ * The local path a `file:` URL names, still encoded and with any fragment: `file:///a/b.md` →
+ * `/a/b.md`, `file://localhost/a` → `/a`, `file:///C:/a` → `C:/a`. `undefined` when `raw` is not
+ * a `file:` URL; `null` for one on another host, which is not a local file.
+ */
+function fileUrlPath(raw: string): string | undefined | null {
+  const match = /^file:\/\/([^/]*)(\/.*)?$/i.exec(raw);
+  if (!match) return /^file:/i.test(raw) ? null : undefined;
+  const [, host = "", path = ""] = match;
+  if (host && host.toLowerCase() !== "localhost") return null;
+  return /^\/[a-z]:[\\/]/i.test(path) ? path.slice(1) : path;
+}
+
 /** Where `href`, as written in a Markdown link or image, leads. */
 export function classifyHref(href: string): LinkTarget {
   const raw = href.trim();
@@ -35,10 +48,13 @@ export function classifyHref(href: string): LinkTarget {
   if (url) return { kind: "external", url };
   if (raw.startsWith("#"))
     return raw.length > 1 ? { kind: "anchor", id: decode(raw.slice(1)) } : { kind: "none" };
-  if (SCHEME.test(raw) || raw.startsWith("//")) return { kind: "none" };
-  const hash = raw.indexOf("#");
-  const fragment = hash >= 0 ? raw.slice(hash + 1) : "";
-  const path = decode(raw.slice(0, hash >= 0 ? hash : undefined).split("?")[0] ?? "");
+  const local = fileUrlPath(raw);
+  if (local === null) return { kind: "none" };
+  if (local === undefined && (SCHEME.test(raw) || raw.startsWith("//"))) return { kind: "none" };
+  const rest = local ?? raw;
+  const hash = rest.indexOf("#");
+  const fragment = hash >= 0 ? rest.slice(hash + 1) : "";
+  const path = decode(rest.slice(0, hash >= 0 ? hash : undefined).split("?")[0] ?? "");
   if (!path) return { kind: "none" };
   // GitHub's `#L42` line fragments.
   const line = /^L(\d+)/.exec(fragment)?.[1];

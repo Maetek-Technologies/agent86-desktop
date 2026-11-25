@@ -183,6 +183,11 @@ the conversation, the way GitHub shows it: headings, lists and task lists, table
 alerts, footnotes, highlighted code, and front matter as a folded table. A finished reply has
 **View as document** (under it, when you point at it) to open it in the same pane.
 
+When the agent writes a document, it links it in its reply. Click the link (or a Markdown path in
+code, such as `docs/plan.md`) to open the document in the pane; a link to any other file opens it
+in its default app, with the same rules as **open**. The pane shows the file as it was when it
+opened: if the agent is still writing it, **↻** reads it again (and keeps Rendered or Raw).
+
 - **Rendered** and **Raw** switch between the document and its source. **Contents** lists its
   headings; click one to go there.
 - **Links:** web and mail links open in your browser or mail app. A link to another Markdown file in

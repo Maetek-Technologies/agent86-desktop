@@ -277,6 +277,7 @@ pub fn thread_plan(
     let mut builder = Agent::builder()
         .provider(default.provider.clone())
         .workspace(workspace)
+        .system_prompt(unstable::system_prompt())
         .builtins(Builtins::All)
         .approval(match guardrails.approval {
             Approval::Ask => ApprovalMode::Ask,
