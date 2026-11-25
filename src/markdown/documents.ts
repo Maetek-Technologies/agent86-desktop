@@ -21,6 +21,8 @@ export type DocumentsAction =
   | { type: "push"; doc: OpenDocument }
   /** A loading document finished: replace it, wherever it is. */
   | { type: "settle"; doc: OpenDocument }
+  /** A document was read again (refresh): replace it, wherever it is, whatever its status. */
+  | { type: "replace"; doc: OpenDocument }
   | { type: "back" }
   | { type: "close" };
 
@@ -34,6 +36,12 @@ export function documentsReduce(state: DocumentsState, action: DocumentsAction):
       const { doc } = action;
       // One opened since, or the pane closed: nothing to replace.
       if (!state.stack.some((d) => d.id === doc.id && d.status === "loading")) return state;
+      return { stack: state.stack.map((d) => (d.id === doc.id ? doc : d)) };
+    }
+    case "replace": {
+      const { doc } = action;
+      // Closed, or gone back past it, since: nothing to replace.
+      if (!state.stack.some((d) => d.id === doc.id)) return state;
       return { stack: state.stack.map((d) => (d.id === doc.id ? doc : d)) };
     }
     case "back":

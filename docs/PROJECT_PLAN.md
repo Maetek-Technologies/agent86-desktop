@@ -366,7 +366,7 @@ redraw it; `render_ui` refuses the prefix.
 
 ## 7a. Next releases
 
-**1.2.0: Markdown viewer.** Built (steps 1–7 below, PR #6); the version is set to 1.2.0, ready to tag. Markdown the agent writes to files is shown today only as raw
+**1.2.0: Markdown viewer.** Built (steps 1–7 below, PR #6, then steps 8–13: documents opened from links in chat replies, and refresh); the version is set to 1.2.0, ready to tag. Markdown the agent writes to files is shown today only as raw
 source (the `new-file` detail on a tool card) or handed to another app with **open**. 1.2.0 adds a
 viewer pane, rendered with [`mdglass`](https://www.npmjs.com/package/mdglass) (markdown-it, GFM
 extras, highlight.js, front matter, heading list, `file:line` references). Chat replies keep
@@ -382,6 +382,12 @@ the viewer.
 | 5 | Entry points | *Done.* **view** beside open and reveal (`FileActions`) for `.md`, `.markdown`, `.mdown`, and `.mkd` paths: on tool cards (reads, new files, and edits) and a kept worktree's files; it calls `ThreadContext.openFile`. **View as document** under a finished assistant reply (shown on hover or focus, not while it streams) opens its text in the pane without a file read |
 | 6 | Look | *Done.* `mdglass/styles.css` loads with the viewer's lazy chunk; `.md-document` (styles.css) sets its `--mdg-*` colours to the app's tokens on the element, so light and dark follow `theme.ts` and win over mdglass's `:root` defaults; alerts use `--hl-title`, `--ok`, `--hl-keyword`, `--warn`, and `--error`. Code is highlighted with lowlight's grammars and the app's `hljs-*` colours (step 2), boxed like chat's code blocks; inline code, links, and footnotes look as in chat; wide tables and code scroll inside the pane. No inline styles: checked in a production build under the release CSP (no violations, no `style` attributes in the document) |
 | 7 | Tests and docs | *Done.* Vitest: the sanitizer and safe rendering (`viewer.test.tsx`: raw HTML as text, images, `javascript:`, plugin output), link sorting and routing (`links.test.ts`, `follow.test.ts`), the toggle and contents, the pane (`document-pane.test.tsx`), the stack (`documents.test.ts`), the entry points (`toolcard.test.tsx`, an App test from a reopened session); Rust: `read_text` and `checked_document_link`. USER_GUIDE, "Reading Markdown documents"; the README's security notes and §5 here; `docs/releases/v1.2.0.md`. The version stays 1.1.3 until the release's own bump |
+| 8 | File links in chat replies | *Done.* `Markdown.tsx` sorts each link with `classifyHref`: http, https, and mailto as before; a Markdown file opens in the thread's pane (`ThreadContext.openFile`, relative paths from the workspace); any other file opens with `open_path`, whose refusal is shown beside the link; anchors and other schemes stay text. Rust's checks are unchanged (workspace or a kept worktree only). Outside a thread (no `ThreadContext`) file links stay text |
+| 9 | `file://` links | *Done.* `classifyHref` takes `file:///abs/path` (and `file://localhost/…`, and `file:///C:/…` on Windows) as a file; in chat and in the viewer |
+| 10 | Markdown paths in inline code | *Done.* `` `docs/plan.md` `` in a reply (no spaces or wildcards, a Markdown extension) is a link to the file, as in step 1; code blocks are untouched |
+| 11 | Tell the agent | *Done.* The thread's system prompt is agent86's `BASE_IDENTITY` plus a short note (`unstable::system_prompt`): when it writes a document for the user, link it in the reply as `[title](path)` relative to the workspace |
+| 12 | Refresh | *Done.* ↻ in the pane's header reads a file again in place (`useDocuments.refresh`, a `replace` action in documents.ts), for a document the agent is still writing: same entry in the stack, so ← and Rendered / Raw are kept; a file that could not be read (not written yet) is tried again. Not for a reply shown as a document; disabled while it reads. No file watcher |
+| 13 | Tests and docs | *Done.* Vitest for the chat links, inline code paths, and `file://`; a Rust test that the prompt keeps agent86's identity; the pane's ↻ (`document-pane.test.tsx`, `documents.test.ts`); USER_GUIDE and `docs/releases/v1.2.0.md`. react-markdown's own URL check drops `file:` links, so chat passes them to the `a` component (`urlTransform`), which sorts them |
 
 Dependencies: `mdglass` 0.1.0 and `dompurify` 3.4.18 (the settled 3.4 line, not the days-old 3.5.0),
 pinned. mdglass's `katex: ^0.16` has a low advisory (GHSA-238p-pmpm-9mq7, fixed in 0.18.2) that
@@ -390,7 +396,7 @@ its range; KaTeX is tree-shaken out anyway (math is off). `highlight.js` 11.11.2
 dependency for `src/highlight/hljs-common.ts`: mdglass highlights with lowlight's grammars, and
 `vite.config.ts` aliases `highlight.js/lib/common` there, so the grammars are bundled once. The
 viewer's renderer (`viewer-engine.ts`) is a lazy chunk. Not in 1.2.0: math, Mermaid, local images,
-editing, live reload of a changed file.
+editing, reloading a changed file by itself (↻ reads it again on request).
 
 **After 1.2.0, in this order.** Collected from the notes above (not-yet-done and not-verified
 items) and §8; each is a release of its own unless small enough to ride along.

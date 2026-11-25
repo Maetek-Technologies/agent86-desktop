@@ -16,6 +16,8 @@
 //! - A thread's secret vault: attached to the keyring with the CLI's per-project layout, so a
 //!   secret remembered in either is loaded by both, and read for the secrets panel.
 //! - Sub-agents' progress, reported through the harness's observer.
+//! - agent86's own identity (`prompt::BASE_IDENTITY`), kept at the head of the thread's system
+//!   prompt, which the app extends with what it can show (links to written documents).
 //! - A provider's model list (the thread's model menu), from agent86's catalog, which knows each
 //!   provider's models endpoint and answer shape, as the CLI's `/model` does.
 //!
@@ -521,6 +523,24 @@ pub fn observe_subagents(
         .set_observer(Some(Arc::new(observer)));
 }
 
+/// What the app adds to agent86's identity: chat replies turn file links into buttons that open
+/// the file (Markdown in the document pane), so a document the agent writes should be linked.
+const DESKTOP_NOTE: &str = "\
+You are running inside agent86 desktop, which renders your replies as Markdown. When you write \
+or update a document for the user (a Markdown file or any other file meant to be read), link it \
+in your reply as [title](path), with the path relative to the workspace, for example \
+[Release plan](docs/release-plan.md). The user clicks the link to open it: Markdown files \
+open rendered beside the conversation, other files in their default app.";
+
+/// The thread's system prompt: agent86's identity, as the CLI sends it, then [`DESKTOP_NOTE`].
+/// The SDK adds the skills section after it.
+pub fn system_prompt() -> String {
+    format!(
+        "{}\n\n{DESKTOP_NOTE}",
+        agent86_core::prompt::BASE_IDENTITY.trim()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,5 +606,13 @@ mod tests {
         assert_eq!(keyring::validate("  sk-abc  ").as_deref(), Ok("sk-abc"));
         assert!(keyring::validate("sk a").is_err());
         assert!(keyring::validate("").is_err());
+    }
+
+    #[test]
+    fn system_prompt_keeps_agent86s_identity_and_asks_for_document_links() {
+        let prompt = system_prompt();
+        assert!(prompt.starts_with(agent86_core::prompt::BASE_IDENTITY.trim()));
+        assert!(prompt.contains("[title](path)"));
+        assert!(prompt.ends_with("in their default app."));
     }
 }
