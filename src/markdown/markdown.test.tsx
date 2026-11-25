@@ -100,7 +100,7 @@ describe("Markdown (docs/SECURITY.md T10)", () => {
   });
 });
 
-describe("Markdown: the thread's files (docs/PROJECT_PLAN.md §7a, step 8)", () => {
+describe("Markdown: the thread's files (docs/PROJECT_PLAN.md §7a, 1.2.1)", () => {
   it.each([
     ["[the plan](docs/plan.md)", "docs/plan.md"],
     ["[notes](./my%20notes.markdown)", "./my notes.markdown"],

@@ -75,7 +75,7 @@ function openLink(event: MouseEvent<HTMLAnchorElement>, url: string) {
 const InLink = createContext(false);
 
 /**
- * A link to a file of the thread's, from a reply (docs/PROJECT_PLAN.md §7a, step 8): a Markdown file
+ * A link to a file of the thread's, from a reply (docs/PROJECT_PLAN.md §7a, 1.2.1): a Markdown file
  * opens in the document pane, anything else with its default app. Relative paths are taken from
  * the workspace, and Rust checks every path again (inside the workspace or a kept worktree, no
  * programs or scripts). Outside a thread there is nothing to open it with, so it is text.
