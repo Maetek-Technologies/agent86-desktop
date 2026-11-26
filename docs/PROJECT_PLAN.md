@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.3).
 
-Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.2.1 (documents from chat links, and refresh, §7a). The version is now 1.2.2 (agent86-core 1.2.3, §7a), ready to tag; after it, the reordered queue in §7a.
+Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.2.2 (agent86-core 1.2.3, §7a). Next: the reordered queue in §7a.
 
 ---
 
@@ -419,7 +419,7 @@ card's **view**. The pane, `read_text_file`, and the link sorting (links.ts) are
 Not in 1.2.1: reloading a changed file by itself (↻ reads it again on request; a file watcher is a
 later step).
 
-**1.2.2: agent86-core 1.2.3.** Built (PR #11); the version is set to 1.2.2, ready to tag. Only the
+**1.2.2: agent86-core 1.2.3.** Released 2026-11-26 (PR #11). Only the
 agent changes: context sized to the window, compaction that keeps the task, the platform in the
 system prompt, and the stall nudge, all on by default (§7, "agent86-core 1.2.3").
 `docs/releases/v1.2.2.md`.
