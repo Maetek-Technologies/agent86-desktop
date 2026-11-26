@@ -43,7 +43,8 @@ Base64 a file with `base64 -w0 file` (Linux), `base64 -i file` (macOS), or
 
 1. Make sure `main` is green in CI.
 2. Set the version in `package.json` and `src-tauri/Cargo.toml` (the app reads it from
-   `package.json`), run `cargo check` in `src-tauri` so `Cargo.lock` follows, and commit.
+   `package.json`), run `cargo check` in `src-tauri` so `Cargo.lock` follows, run `pnpm badges` so
+   the README's badges (`docs/images/badges/`) show the new versions, and commit.
 3. Tag and push: `git tag v1.2.3 && git push origin v1.2.3`. The workflow refuses a tag that does
    not match `package.json`.
 4. Wait for the four builds (Windows, macOS arm64 and x64, Linux). Open the draft release and check

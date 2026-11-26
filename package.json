@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "badges": "node scripts/update-badges.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.5",
