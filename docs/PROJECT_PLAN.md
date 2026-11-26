@@ -4,7 +4,7 @@ A native desktop app for agent86: a **Tauri 2** shell whose **React** front end 
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
 in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.3).
 
-Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.2.0 (the Markdown viewer, §7a). The version is now 1.2.1 (documents from chat links, and refresh, §7a), ready to tag; after it, the reordered queue in §7a.
+Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.2.1 (documents from chat links, and refresh, §7a). The version is now 1.2.2 (agent86-core 1.2.3, §7a), ready to tag; after it, the reordered queue in §7a.
 
 ---
 
@@ -402,8 +402,7 @@ dependency for `src/highlight/hljs-common.ts`: mdglass highlights with lowlight'
 viewer's renderer (`viewer-engine.ts`) is a lazy chunk. Not in 1.2.0: math, Mermaid, local images,
 editing, live reload of a changed file.
 
-**1.2.1: documents from chat links, and refresh.** Built (steps 1–6 below, PR #9); the version is
-set to 1.2.1, ready to tag. What 1.2.0 missed: the agent writes a document and links it in its
+**1.2.1: documents from chat links, and refresh.** Released 2026-11-25 (steps 1–6 below, PR #9). What 1.2.0 missed: the agent writes a document and links it in its
 reply, and the link opens it. In 1.2.0 a chat reply's file link was plain text (Markdown.tsx let
 only http, https, and mailto through), so a written file reached the pane only through a tool
 card's **view**. The pane, `read_text_file`, and the link sorting (links.ts) are reused as they are.
@@ -420,7 +419,12 @@ card's **view**. The pane, `read_text_file`, and the link sorting (links.ts) are
 Not in 1.2.1: reloading a changed file by itself (↻ reads it again on request; a file watcher is a
 later step).
 
-**After 1.2.1, in this order.** Collected from the notes above (not-yet-done and not-verified
+**1.2.2: agent86-core 1.2.3.** Built (PR #11); the version is set to 1.2.2, ready to tag. Only the
+agent changes: context sized to the window, compaction that keeps the task, the platform in the
+system prompt, and the stall nudge, all on by default (§7, "agent86-core 1.2.3").
+`docs/releases/v1.2.2.md`.
+
+**After 1.2.2, in this order.** Collected from the notes above (not-yet-done and not-verified
 items) and §8; each is a release of its own unless small enough to ride along.
 
 | Order | Item | Why here |
