@@ -30,7 +30,7 @@ use ts_rs::TS;
 
 /// The agent86-core version this build embeds. It matches the exact pin in Cargo.toml; the test
 /// below fails if the two drift apart.
-pub const AGENT86_CORE_VERSION: &str = "1.2.2";
+pub const AGENT86_CORE_VERSION: &str = "1.2.3";
 
 #[derive(Debug, Serialize, PartialEq, Eq, TS)]
 #[ts(export)]

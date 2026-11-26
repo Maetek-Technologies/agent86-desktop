@@ -2,7 +2,7 @@
 
 A native desktop app for agent86: a **Tauri 2** shell whose **React** front end is derived from
 [agent86-web](../../agent86-web) (`packages/web`), and whose **Rust** back end embeds the agent
-in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.2).
+in-process through [`agent86-core`](https://crates.io/crates/agent86-core) (`agent86_core::sdk`, v1.2.3).
 
 Status: v1.0.0 released 2026-11-20 (M0-M8 done): installers for Windows, macOS (arm64 and x64), and Linux on GitHub Releases, with in-app updates. Not yet code-signed. Latest published: v1.2.0 (the Markdown viewer, §7a). The version is now 1.2.1 (documents from chat links, and refresh, §7a), ready to tag; after it, the reordered queue in §7a.
 
@@ -229,7 +229,7 @@ agent86-desktop/
 │   ├── settings/          # new: providers, keys, limits, MCP, first-run
 │   └── ...                # markdown/, highlight/, tools/, thread/, shell/, secrets/, memory/, trust/
 ├── src-tauri/
-│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.2.2", tokio, serde, ts-rs, keyring
+│   ├── Cargo.toml         # tauri 2, agent86-core = "=1.2.3", tokio, serde, ts-rs, keyring
 │   ├── tauri.conf.json, capabilities/
 │   └── src/               # see 3.1
 └── .github/workflows/     # ci.yml (lint, test, build); release.yml (tauri-action matrix)
@@ -362,6 +362,16 @@ redraw it; `render_ui` refuses the prefix.
   `{}`; `Tool::retry_hint` is a provided method. `TurnEvent` and agent86-ui's runtime (which
   `runtime/` ports) are unchanged, and `unstable.rs` builds as it was.
 
+**agent86-core 1.2.3.** Its changes reach the threads with no work here. The `sdk` API only gains
+(`AgentBuilder::verify`, `RunResult::verification`, `Provider::temperature`, a provided method), and
+the app calls none of them. The local-model work (`[limits] context_sizing` and `stall_nudge`) is on
+by default in the built-in limits the builder starts from, and so is the platform in the environment
+line. The ACP extensions (`com.maetek.agent86/a2ui`, `com.maetek.agent86/questions`) are for ACP
+clients; the app is an in-process `Ui`. agent86-ui's A2UI fixtures (the commit in
+`src/thread/surface/runtime/fixtures/UPSTREAM.md`) and `TurnEvent` are unchanged, and `unstable.rs`
+builds as it was. Not taken up yet: per-provider temperature and the verification gate in the app's
+settings.
+
 ---
 
 ## 7a. Next releases
@@ -442,7 +452,7 @@ items) and §8; each is a release of its own unless small enough to ride along.
 
 | Risk | Mitigation |
 | --- | --- |
-| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.2.2"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
+| Memory facts and pins, and the CLI-compatible embedder (required by D2), need `Memory::store()` and `build_embedder`, which have no semver promise | Pin `agent86-core = "=1.2.3"`; isolate in `unstable.rs`; ask upstream to promote these into `sdk` (same author) |
 | `local-embeddings` (candle, tokenizers, enabled per D2) roughly doubles dependencies and binary size, and lengthens three-OS CI builds | Cache cargo builds in CI; measure installer size in M0 |
 | Blocking callbacks on the turn thread could deadlock on cancel or close | Cancel and close always resolve pending questions; test it |
 | The UI is coupled to ACP-shaped state (`ToolKind`, `locations`, ACP diff content) | Keep the state shape; derive kind and locations from tool name and args in Rust; use `ApprovalPreview.change` for diffs |
