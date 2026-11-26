@@ -1,33 +1,79 @@
-# agent86-desktop
+![The agent86 logo: a robot detective in a fedora beside a seven-segment 86, on a retro badge reading AGENT 86](public/agent86-logo.png)
 
-A desktop app for [agent86](https://github.com/Maetek-Technologies/agent86): a Tauri 2 shell with a
-React front end derived from [agent86-web](https://github.com/Maetek-Technologies/Agent86-web), and a
-Rust back end that embeds the agent in-process through
-[`agent86-core`](https://crates.io/crates/agent86-core).
+# agent 86 desktop
 
-> **Status: 1.0.0.** Threads run in tabs, in parallel, with streamed answers, thinking, tool cards
-> with diffs, approvals, limit raises, secret prompts, `/` commands, `@` file mentions, and a
-> context meter. Sessions are saved to the memory database the agent86 CLI uses
-> (`~/.agent86/memory.db`), listed in the sidebar, and can be reopened and renamed. The app has
-> its own settings (providers and models, triage, limits, guardrails, MCP servers), set up on
-> first run by importing your agent86 CLI config or choosing a provider. A memory panel shows
-> and pins what the agent remembers, a secrets panel manages each thread's secrets, a project's
-> own skills, specialists, and MCP servers load once you trust them, and sub-agents' work
-> (including isolated runs in git worktrees) shows on their delegation's card. It notifies you
-> when a background thread needs you or a long turn ends, remembers its window, runs as a single
-> instance, can show a tray icon with the running turns, opens or reveals the files tool cards
-> show, switches a thread's model (from each provider's list) and permissions (ask, auto, read-only)
-> from its header, shows the agent's activity (tokens, cost, tool calls) and its own log in a Logs
-> view, has light and dark themes, and keyboard shortcuts (listed in Settings, Appearance), and
-> updates itself from GitHub Releases. The plan and milestones are in
-> [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+[![CI](https://github.com/Maetek-Technologies/agent86-desktop/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Maetek-Technologies/agent86-desktop/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Maetek-Technologies/agent86-desktop)](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/Maetek-Technologies/agent86-desktop)](LICENSE)
+
+[![agent86-core](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fsrc-tauri%2FCargo.toml&query=%24.dependencies%5B%27agent86-core%27%5D&label=agent86-core&logo=rust&color=dea584)](https://crates.io/crates/agent86-core)
+[![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fsrc-tauri%2FCargo.toml&query=%24.package%5B%27rust-version%27%5D&label=rust&suffix=%2B&logo=rust&color=dea584)](https://www.rust-lang.org)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri)](https://tauri.app)
+[![React](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fpackage.json&query=%24.dependencies.react&label=react&logo=react&color=61dafb)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fpackage.json&query=%24.devDependencies.typescript&label=typescript&logo=typescript&color=3178c6)](https://www.typescriptlang.org)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#install)
+
+A desktop app for the [agent86](https://github.com/Maetek-Technologies/agent86) coding agent. The
+agent runs inside the app, embedded in-process through
+[`agent86-core`](https://crates.io/crates/agent86-core): there is no separate `agent86` binary,
+server, or browser to set up. It is a Tauri 2 shell with a React front end derived from
+[agent86-web](https://github.com/Maetek-Technologies/Agent86-web), and it shares API keys,
+sessions, and memory with the agent86 CLI, so you can start work in one and carry on in the other.
+
+## Quickstart
+
+1. Download the installer for your system from the
+   [latest release](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest) and
+   install it.
+2. On first launch, import your agent86 CLI settings (`~/.agent86/config.toml`), or pick a
+   provider, a model, and (if it needs one) an API key. **Test** checks all three.
+3. **New thread** (Ctrl+T or ⌘T), choose a workspace folder, and ask.
+
+By default, every file write, command, and snippet asks for your approval before it runs.
+
+## What it does
+
+- **Threads in tabs.** Several threads run in parallel, each in its own workspace, with streamed
+  answers, thinking, a context meter, `/` commands, and `@` file mentions. A tab that needs you
+  says so, and a notification tells you when a background thread is waiting or a long turn ends.
+- **Tool cards with diffs.** Every tool call shows its arguments and result; edits show as diffs,
+  and files on a card can be opened, revealed, or (for Markdown) viewed.
+- **Approvals, limits, and secrets.** Approve or deny each change, raise a limit when a turn hits
+  one, and hand over secrets in a masked prompt: the model sees only `${secret:NAME}`.
+- **Forms and questions from the agent.** The agent can draw forms, choices, and confirmations
+  (agent86UI, in Google's A2UI format) and ask you questions through a form, always inside a frame
+  marked as drawn by the agent.
+- **A Markdown viewer.** Documents the agent writes open rendered beside the conversation, from a
+  tool card or a link in its reply, with contents, Raw view, link following, and refresh.
+- **Sessions and memory.** Sessions are saved to the same database the CLI uses, listed in the
+  sidebar, and can be reopened and renamed. A memory panel shows and pins what the agent remembers.
+- **Any model, switchable per thread.** OpenRouter, Anthropic, OpenAI, Google, Ollama, vLLM, and
+  other OpenAI-compatible servers; a thread's header switches its model (from each provider's list)
+  and its permissions (ask, auto, read-only).
+- **Projects, skills, sub-agents, and MCP.** A project's own skills, specialists, and MCP servers
+  load once you trust them; sub-agents' work, including isolated runs in git worktrees, shows on
+  their delegation's card.
+- **Logs.** The agent's activity (tokens, cost, tool calls) and the app's own log.
+- **A proper desktop app.** Light and dark themes, keyboard shortcuts, an optional tray icon with
+  the running turns, a remembered window, a single instance, and updates from GitHub Releases.
+
+The [user guide](docs/USER_GUIDE.md) covers everything the app does.
 
 ## Install
 
-Download the installer for Windows, macOS (Apple Silicon or Intel), or Linux from the
-[latest release](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest). The
-[user guide](docs/USER_GUIDE.md) covers which file to pick, the first launch, setup, and everything
-the app does.
+Download the installer for your system from the
+[latest release](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest):
+
+| System               | File                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| Windows 10 and 11    | `Agent 86_<version>_x64-setup.exe` (for you only, no admin prompt), or the `.msi` for all users |
+| macOS, Apple Silicon | `Agent 86_<version>_aarch64.dmg`                                                                |
+| macOS, Intel         | `Agent 86_<version>_x64.dmg`                                                                    |
+| Linux                | `.AppImage` (any distribution; updates itself), or `.deb` / `.rpm`                              |
+
+The app updates itself from GitHub Releases. The installers are not code-signed yet, so Windows
+SmartScreen and macOS Gatekeeper warn on first launch; the
+[user guide](docs/USER_GUIDE.md#the-first-time-you-open-it) shows how to get past them.
 
 ## Settings and keys
 
@@ -61,6 +107,53 @@ the app does.
   `HOME` points elsewhere too. On Windows, point `APPDATA` and `LOCALAPPDATA` into that profile
   as well, or Tauri cannot find its own folders and the window's place is not kept.
 
+## Status
+
+Version 1.2.2 embeds agent86-core 1.2.3. Version 1.0.0 (2026-11-20) did everything above except
+the agent's forms and the Markdown viewer; the plan and milestones are in
+[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
+
+- [x] 1.0.0: threads, tool cards, approvals, sessions, memory, secrets, project trust, settings
+      and first-run import, logs, tray, notifications, and in-app updates, with installers for
+      Windows, macOS (arm64 and x64), and Linux (released 2026-11-20)
+- [x] 1.1.0 to 1.1.3: surfaces the agent draws (agent86UI, from agent86 1.2.0), locking a surface
+      once you send it, questions from the agent (`ask_user`, from agent86 1.2.2), and links in
+      replies opening again
+- [x] 1.2.0: the Markdown viewer, beside the conversation (released 2026-11-25; see
+      [docs/releases/v1.2.0.md](docs/releases/v1.2.0.md))
+- [x] 1.2.1: documents opened from links in the agent's replies, and refresh (released
+      2026-11-25; see [docs/releases/v1.2.1.md](docs/releases/v1.2.1.md))
+- [x] 1.2.2: agent86-core 1.2.3, a harness better suited to local models: context sized to the
+      window, compaction that keeps the task, the platform in the system prompt, and a stall nudge
+      (see [docs/releases/v1.2.2.md](docs/releases/v1.2.2.md))
+- [ ] End-to-end tests: Playwright against the Vite build on every PR, then a small
+      `tauri-driver` suite
+- [ ] Release verification: a real install-and-update cycle on all three systems
+- [ ] Code signing: Authenticode, and Apple Developer ID with notarization
+- [ ] Math and Mermaid diagrams in the Markdown viewer
+
+Notes for every release are in [docs/releases](docs/releases).
+
+## Why Tauri?
+
+The goal is a double-click app with no Node, no `agent86` binary, no bridge process, and no browser
+token. Tauri gives a small native shell around the system's own WebView, so the React UI from
+agent86-web carries over, while the agent itself runs in Rust in the same process through
+`agent86-core`'s SDK. agent86's safety model (the workspace jail, approval gate, sandbox,
+guardrails, and secret vault) lives in that library, so the app keeps it by building on it rather
+than reimplementing it.
+
+## Compatibility with the CLI
+
+The app reads no CLI config at run time (the SDK reads nothing it is not handed), but it stays
+compatible with the agent86 CLI where that is cheap:
+
+- The same API keys, in the same OS keyring entries
+- The same session and memory database (`~/.agent86/memory.db`), so a session started in one opens
+  in the other
+- The same per-project remembered secrets
+- A one-time import of `~/.agent86/config.toml` on first run
+
 ## Prerequisites
 
 - Rust 1.94 or newer (`rustup`), with the MSVC toolchain on Windows
@@ -79,14 +172,25 @@ takes several minutes. Later builds are incremental.
 pnpm install
 pnpm app:dev        # Vite on :1420 plus the Tauri window, with hot reload
 pnpm app:build      # installers for this platform (needs the updater key: docs/RELEASING.md)
+```
 
+Before a pull request, run the checks CI runs:
+
+```sh
 pnpm test           # front-end tests (Vitest)
-cd src-tauri && cargo test real_model -- --ignored --nocapture   # one real turn with your CLI config's model
 pnpm lint && pnpm format:check && pnpm typecheck
 cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 ```
 
-`cargo` commands need the front end built once (`pnpm build`), because the app embeds `dist/`.
+`cargo` commands need the front end built once (`pnpm build`), because the app embeds `dist/`. To
+run one real turn with your CLI config's model:
+
+```sh
+cd src-tauri && cargo test real_model -- --ignored --nocapture
+```
+
+[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) covers the design and what comes next, and
+[docs/RELEASING.md](docs/RELEASING.md) covers releases.
 
 ## Layout
 
@@ -94,7 +198,7 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/`       | The React app; `desktop-client/` is the only code that calls into Rust; `desktop-client/generated/` holds the IPC types `cargo test` writes from Rust (ts-rs); `settings/` is the settings view and first-run screen |
 | `src-tauri/` | The Tauri app: commands, settings, keys, the CLI config import, and the thread actors around agent86-core; `src/unstable.rs` is the only code that uses agent86-core outside its semver-covered `sdk` module         |
-| `docs/`      | The project plan, the user guide, and how to release                                                                                                                                                                 |
+| `docs/`      | The project plan, the user guide, release notes, and how to release                                                                                                                                                  |
 
 ## License
 
