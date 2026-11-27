@@ -3,15 +3,15 @@
 # agent 86 desktop
 
 [![CI](https://github.com/Maetek-Technologies/agent86-desktop/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Maetek-Technologies/agent86-desktop/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Maetek-Technologies/agent86-desktop)](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/Maetek-Technologies/agent86-desktop)](LICENSE)
+[![Release](docs/images/badges/release.svg)](https://github.com/Maetek-Technologies/agent86-desktop/releases/latest)
+[![License: MIT](docs/images/badges/license.svg)](LICENSE)
 
-[![agent86-core](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fsrc-tauri%2FCargo.toml&query=%24.dependencies%5B%27agent86-core%27%5D&label=agent86-core&logo=rust&color=dea584)](https://crates.io/crates/agent86-core)
-[![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fsrc-tauri%2FCargo.toml&query=%24.package%5B%27rust-version%27%5D&label=rust&suffix=%2B&logo=rust&color=dea584)](https://www.rust-lang.org)
-[![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri)](https://tauri.app)
-[![React](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fpackage.json&query=%24.dependencies.react&label=react&logo=react&color=61dafb)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMaetek-Technologies%2Fagent86-desktop%2Fmain%2Fpackage.json&query=%24.devDependencies.typescript&label=typescript&logo=typescript&color=3178c6)](https://www.typescriptlang.org)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#install)
+[![agent86-core](docs/images/badges/agent86-core.svg)](https://crates.io/crates/agent86-core)
+[![Rust](docs/images/badges/rust.svg)](https://www.rust-lang.org)
+[![Tauri](docs/images/badges/tauri.svg)](https://tauri.app)
+[![React](docs/images/badges/react.svg)](https://react.dev)
+[![TypeScript](docs/images/badges/typescript.svg)](https://www.typescriptlang.org)
+[![Platforms](docs/images/badges/platforms.svg)](#install)
 
 A desktop app for the [agent86](https://github.com/Maetek-Technologies/agent86) coding agent. The
 agent runs inside the app, embedded in-process through
