@@ -18,7 +18,8 @@ agent runs inside the app, embedded in-process through
 [`agent86-core`](https://crates.io/crates/agent86-core): there is no separate `agent86` binary,
 server, or browser to set up. It is a Tauri 2 shell with a React front end derived from
 [agent86-web](https://github.com/Maetek-Technologies/Agent86-web), and it shares API keys,
-sessions, and memory with the agent86 CLI, so you can start work in one and carry on in the other.
+sessions, and memory with the agent86 CLI, so you can start work in one and carry on in the other. Website:
+[maetek-technologies.github.io/agent86-desktop](https://maetek-technologies.github.io/agent86-desktop/).
 
 ## Quickstart
 
@@ -199,6 +200,7 @@ cd src-tauri && cargo test real_model -- --ignored --nocapture
 | `src/`       | The React app; `desktop-client/` is the only code that calls into Rust; `desktop-client/generated/` holds the IPC types `cargo test` writes from Rust (ts-rs); `settings/` is the settings view and first-run screen |
 | `src-tauri/` | The Tauri app: commands, settings, keys, the CLI config import, and the thread actors around agent86-core; `src/unstable.rs` is the only code that uses agent86-core outside its semver-covered `sdk` module         |
 | `docs/`      | The project plan, the user guide, release notes, and how to release                                                                                                                                                  |
+| `site/`      | The project website, published to GitHub Pages by `.github/workflows/pages.yml`                                                                                                                                      |
 
 ## License
 
