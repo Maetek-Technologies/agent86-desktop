@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent 86 desktop: the agent86 coding agent as a desktop app</title>
+    <meta
+      name="description"
+      content="A desktop app for the agent86 coding agent: parallel threads in tabs, tool cards with diffs, approvals, sessions, memory, and MCP servers, with the agent embedded in-process. Installers for Windows, macOS, and Linux."
+    />
+    <meta property="og:title" content="Agent 86 desktop" />
+    <meta
+      property="og:description"
+      content="The agent86 coding agent as a desktop app: parallel threads, tool cards with diffs, approvals, sessions, memory, and MCP, with no separate binary or server to set up."
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:image"
+      content="https://maetek-technologies.github.io/agent86-desktop/images/agent86-logo.png"
+    />
+    <link rel="icon" type="image/png" href="images/agent86-logo.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <nav class="nav wrap">
+        <a class="brand" href="./"
+          ><img src="images/agent86-logo.png" alt="" width="32" height="32" /> agent86 desktop</a
+        >
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#cli">CLI</a></li>
+          <li><a href="#docs">Docs</a></li>
+          <li><a href="https://github.com/Maetek-Technologies/agent86-desktop">GitHub</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero wrap">
+        <img
+          class="logo"
+          src="images/agent86-logo.png"
+          alt="The agent86 logo: a robot detective in a fedora beside a seven-segment 86, on a retro badge reading AGENT 86"
+          width="200"
+          height="200"
+        />
+        <h1>agent 86 desktop</h1>
+        <p class="tagline">
+          The <a href="https://maetek-technologies.github.io/agent86/">agent86</a> coding agent as a
+          desktop app. The agent runs inside the app: no separate binary, server, or browser to set
+          up.
+        </p>
+        <div class="cta">
+          <a
+            class="button"
+            href="https://github.com/Maetek-Technologies/agent86-desktop/releases/latest"
+            >Download the latest release</a
+          >
+          <a class="button ghost" href="https://github.com/Maetek-Technologies/agent86-desktop"
+            >View on GitHub</a
+          >
+        </div>
+        <p class="platforms">
+          Windows 10 and 11 · macOS (Apple silicon and Intel) · Linux · MIT licensed
+        </p>
+      </section>
+
+      <section id="features" class="wrap">
+        <h2>What it does</h2>
+        <div class="grid">
+          <article>
+            <h3>Threads in tabs, in parallel</h3>
+            <p>
+              Each thread works in its own workspace folder, with streamed answers, thinking, a
+              context meter, <code>/</code> commands, and <code>@</code> file mentions. A tab that
+              needs you says so, and a notification tells you when a background thread is waiting or
+              a long turn ends.
+            </p>
+          </article>
+          <article>
+            <h3>Tool cards with diffs</h3>
+            <p>
+              Every tool call shows its arguments and result, and edits show as diffs. Files on a
+              card can be opened or revealed in Explorer or Finder; programs and scripts are only
+              ever revealed, never run.
+            </p>
+          </article>
+          <article>
+            <h3>Approvals, behind your say-so</h3>
+            <p>
+              Every file write, command, and snippet asks first, with the diff or the command in
+              front of you. Raise a limit when a turn hits one, and switch a thread between ask,
+              auto, and read-only from its header.
+            </p>
+          </article>
+          <article>
+            <h3>Forms and questions</h3>
+            <p>
+              The agent can draw forms, choices, and confirmations (agent86UI, in Google's A2UI
+              format) and ask you questions through a form, always inside a frame marked as drawn by
+              the agent, so it never looks like the app's own prompts.
+            </p>
+          </article>
+          <article>
+            <h3>A Markdown viewer</h3>
+            <p>
+              Documents the agent writes open rendered beside the conversation, from a tool card or
+              a link in its reply, with contents, Raw view, link following, and refresh. Images are
+              never loaded and raw HTML never runs.
+            </p>
+          </article>
+          <article>
+            <h3>Any model, per thread</h3>
+            <p>
+              OpenRouter, Anthropic, OpenAI, Google, Ollama, vLLM, and other OpenAI-compatible
+              servers. A thread's header switches its model from each provider's own list. Keys live
+              in the OS keyring, never in a settings file.
+            </p>
+          </article>
+          <article>
+            <h3>Sessions and memory</h3>
+            <p>
+              Sessions are saved to the database the agent86 CLI uses, listed in the sidebar, and
+              can be reopened and renamed. A memory panel shows and pins what the agent remembers.
+            </p>
+          </article>
+          <article>
+            <h3>Secrets stay out of the chat</h3>
+            <p>
+              Hand over a key in a masked prompt; the model sees only <code>${secret:NAME}</code>,
+              and the value reaches tools as an environment variable. A secret remembered for a
+              project loads in later threads, in the app or the CLI.
+            </p>
+          </article>
+          <article>
+            <h3>Skills, sub-agents, and MCP</h3>
+            <p>
+              A project's own skills, specialists, and MCP servers load once you review and trust
+              them. Sub-agents' work, including isolated runs in git worktrees, shows on their
+              delegation's card.
+            </p>
+          </article>
+          <article>
+            <h3>Logs, tokens, and cost</h3>
+            <p>
+              A Logs view shows the agent's activity, with tokens, cost estimates, and tool calls
+              for each turn, beside the app's own log.
+            </p>
+          </article>
+          <article>
+            <h3>The agent, built in</h3>
+            <p>
+              The agent runs in-process on <code>agent86-core</code>, with the same workspace jail,
+              sandbox, guardrails, and secret vault as the CLI. Nothing else to install: no Node, no
+              <code>agent86</code> binary, no bridge.
+            </p>
+          </article>
+          <article>
+            <h3>A proper desktop app</h3>
+            <p>
+              Light and dark themes, keyboard shortcuts, an optional tray icon with the running
+              turns, a remembered window, a single instance, and updates from GitHub Releases.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="install" class="wrap">
+        <h2>Install</h2>
+        <p>
+          Download the installer for your system from the
+          <a href="https://github.com/Maetek-Technologies/agent86-desktop/releases/latest"
+            >latest release</a
+          >. The app updates itself from then on.
+        </p>
+        <div class="table-scroll">
+          <table class="downloads">
+            <thead>
+              <tr>
+                <th>System</th>
+                <th>File</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Windows 10 and 11</td>
+                <td>
+                  <code>Agent 86_&lt;version&gt;_x64-setup.exe</code> (for you only, no admin
+                  prompt), or the <code>.msi</code> for all users
+                </td>
+              </tr>
+              <tr>
+                <td>macOS, Apple silicon</td>
+                <td><code>Agent 86_&lt;version&gt;_aarch64.dmg</code></td>
+              </tr>
+              <tr>
+                <td>macOS, Intel</td>
+                <td><code>Agent 86_&lt;version&gt;_x64.dmg</code></td>
+              </tr>
+              <tr>
+                <td>Linux</td>
+                <td>
+                  <code>.AppImage</code> (any distribution; updates itself), or <code>.deb</code> /
+                  <code>.rpm</code>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Then</h3>
+        <div class="install">
+          <div>
+            <h3>1. Set up a model</h3>
+            <p>
+              On first launch, import your agent86 CLI settings
+              (<code>~/.agent86/config.toml</code>), or pick a provider, a model, and (if it needs
+              one) an API key. <strong>Test</strong> checks all three.
+            </p>
+          </div>
+          <div>
+            <h3>2. Open a thread</h3>
+            <p>
+              <strong>New thread</strong> (Ctrl+T or ⌘T) asks for a workspace folder. The agent
+              works only inside it, and commands run in agent86's sandbox.
+            </p>
+          </div>
+          <div>
+            <h3>3. Ask</h3>
+            <p>
+              Type a task, mention files with <code>@</code>, and approve each change as it comes.
+              Open more tabs to run threads side by side.
+            </p>
+          </div>
+        </div>
+        <p class="note">
+          The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn
+          on first launch; the
+          <a
+            href="https://github.com/Maetek-Technologies/agent86-desktop/blob/main/docs/USER_GUIDE.md#the-first-time-you-open-it"
+            >user guide</a
+          >
+          shows how to get past them.
+        </p>
+      </section>
+
+      <section id="cli" class="wrap">
+        <h2>Works with the agent86 CLI</h2>
+        <p>
+          The app embeds the agent through
+          <a href="https://crates.io/crates/agent86-core"><code>agent86-core</code></a
+          >, the same library behind the
+          <a href="https://github.com/Maetek-Technologies/agent86">agent86</a> command line, with
+          the same workspace jail, approvals, sandbox, guardrails, and secret vault. It stays
+          compatible with the CLI where that matters:
+        </p>
+        <ul class="docs">
+          <li>
+            The same API keys, in the same OS keyring entries: a key set with
+            <code>agent86 keys set &lt;provider&gt;</code> works in both
+          </li>
+          <li>
+            The same session and memory database (<code>~/.agent86/memory.db</code>), so a session
+            started in one opens in the other
+          </li>
+          <li>The same per-project remembered secrets</li>
+          <li>
+            A one-time import of <code>~/.agent86/config.toml</code> on first run; after that, the
+            two keep their own settings
+          </li>
+        </ul>
+      </section>
+
+      <section id="docs" class="wrap">
+        <h2>Documentation</h2>
+        <ul class="docs">
+          <li>
+            <a
+              href="https://github.com/Maetek-Technologies/agent86-desktop/blob/main/docs/USER_GUIDE.md"
+              >User guide</a
+            >: install, setup, and everything the app does
+          </li>
+          <li>
+            <a href="https://github.com/Maetek-Technologies/agent86-desktop#readme">README</a>: an
+            overview, settings and keys, and building from source
+          </li>
+          <li>
+            <a
+              href="https://github.com/Maetek-Technologies/agent86-desktop/blob/main/docs/PROJECT_PLAN.md"
+              >Project plan</a
+            >: the design, status, and what comes next
+          </li>
+          <li>
+            <a
+              href="https://github.com/Maetek-Technologies/agent86-desktop/blob/main/docs/RELEASING.md"
+              >Releasing</a
+            >: how releases and in-app updates are built
+          </li>
+          <li>
+            <a href="https://github.com/Maetek-Technologies/agent86-desktop/releases"
+              >Release notes</a
+            >
+          </li>
+          <li>
+            <a href="https://maetek-technologies.github.io/agent86/">agent86</a>: the agent itself,
+            on the command line and in editors
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="wrap">
+      <p>
+        Agent 86 desktop is MIT licensed.
+        <a href="https://github.com/Maetek-Technologies/agent86-desktop/issues">Issues</a> ·
+        <a href="https://github.com/Maetek-Technologies/agent86">agent86</a>
+      </p>
+    </footer>
+  </body>
+</html>
